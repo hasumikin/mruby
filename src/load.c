@@ -586,7 +586,8 @@ read_binary_header(const uint8_t *bin, size_t bufsize, size_t *bin_size, uint8_t
   return MRB_DUMP_OK;
 }
 
-static struct RProc*
+//static struct RProc*
+struct RProc*
 read_irep(mrb_state *mrb, const uint8_t *bin, size_t bufsize, uint8_t flags)
 {
   int result;

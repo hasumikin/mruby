@@ -32,6 +32,7 @@ MRuby.each_target do |build|
     end
   end
 
+  binding.irb
   file presym.list_path => ppps do
     presyms = presym.scan(ppps)
     current_presyms = presym.read_list if File.exist?(presym.list_path)
