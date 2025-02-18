@@ -952,10 +952,18 @@ root_scan_phase(mrb_state *mrb, mrb_gc *gc)
   /* mark exception */
   mrb_gc_mark(mrb, (struct RBasic*)mrb->exc);
 
+#ifdef MRB_USE_TASK_SCHEDULER
+  if (mrb->c_list) {
+    for (int i = 0; i < mrb->c_list_len; i++) {
+      mark_context(mrb, mrb->c_list[i]);
+    }
+  }
+#else
   mark_context(mrb, mrb->c);
   if (mrb->root_c != mrb->c) {
     mark_context(mrb, mrb->root_c);
   }
+#endif
 }
 
 static void

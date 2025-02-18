@@ -22,6 +22,15 @@
 #include <mruby/internal.h>
 #include <mruby/presym.h>
 
+#ifdef PICORB_VM_MRUBY
+#ifndef MRB_USE_TASK_SCHEDULER
+#define MRB_USE_TASK_SCHEDULER
+#endif
+#ifndef MRB_USE_VM_SWITCH_DISPATCH
+#define MRB_USE_VM_SWITCH_DISPATCH
+#endif
+#endif
+
 #ifdef MRB_NO_STDIO
 #if defined(__cplusplus)
 extern "C" {
@@ -1521,7 +1530,16 @@ prepare_tagged_break(mrb_state *mrb, uint32_t tag, const mrb_callinfo *return_ci
 #define CASE(insn,ops) case insn: { const mrb_code *pc = ci->pc+1; FETCH_ ## ops (); ci->pc = pc; } L_ ## insn ## _BODY:
 #define NEXT goto L_END_DISPATCH
 #define JUMP NEXT
-#define END_DISPATCH L_END_DISPATCH:;}}
+#ifdef MRB_USE_TASK_SCHEDULER
+  #define END_DISPATCH L_END_DISPATCH: \
+    if (mrb->task.switching || mrb->c->status == MRB_TASK_STOPPED) return mrb_nil_value();}}
+  #define TASK_STOP(mrb) \
+    if (mrb->c->status == MRB_TASK_CREATED) mrb->c->status = MRB_TASK_STOPPED;
+
+#else
+  #define END_DISPATCH L_END_DISPATCH:;}}
+  #define TASK_STOP(mrb)
+#endif
 
 #else
 
@@ -1531,6 +1549,7 @@ prepare_tagged_break(mrb_state *mrb, uint32_t tag, const mrb_callinfo *return_ci
 #define JUMP NEXT
 
 #define END_DISPATCH
+#define TASK_STOP(mrb)
 
 #endif
 
@@ -2643,6 +2662,16 @@ RETRY_TRY_BLOCK:
           return v;
         }
 
+#ifdef MRB_USE_TASK_SCHEDULER
+        mrb_assert(MRB_TASK_CREATED < mrb->c->status);
+        if (mrb->c->status == MRB_TASK_CREATED) {
+          mrb_gc_arena_restore(mrb, ai);
+          mrb->jmp = prev_jmp;
+          TASK_STOP(mrb);
+          return v;
+        }
+#endif
+
         fiber_terminate(mrb, c, ci);
         if (c->vmexec ||
             (mrb->c == mrb->root_c && mrb->c->ci == mrb->c->cibase) /* case using Fiber#transfer in mrb_fiber_resume() */) {
@@ -3339,7 +3368,9 @@ RETRY_TRY_BLOCK:
         UNWIND_ENSURE(mrb, ci, ci->pc, RBREAK_TAG_STOP, ci, v);
       }
       CHECKPOINT_END(RBREAK_TAG_STOP);
+      mrb_gc_arena_restore(mrb, ai);
       mrb->jmp = prev_jmp;
+      TASK_STOP(mrb);
       if (!mrb_nil_p(v)) {
         mrb->exc = mrb_obj_ptr(v);
         return v;

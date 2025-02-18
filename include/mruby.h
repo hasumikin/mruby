@@ -186,6 +186,10 @@ enum mrb_fiber_state {
   MRB_FIBER_SUSPENDED,
   MRB_FIBER_TRANSFERRED,
   MRB_FIBER_TERMINATED,
+#ifdef MRB_USE_TASK_SCHEDULER
+  MRB_TASK_CREATED,
+  MRB_TASK_STOPPED,
+#endif
 };
 
 struct mrb_context {
@@ -241,6 +245,17 @@ struct mrb_cache_entry {
 struct mrb_jmpbuf;
 
 typedef void (*mrb_atexit_func)(struct mrb_state*);
+
+#ifdef MRB_USE_TASK_SCHEDULER
+#define MRB_NUM_TASK_QUEUE 4
+typedef struct RTcb mrb_tcb;
+typedef struct mrb_task_state {
+  mrb_tcb *queues[MRB_NUM_TASK_QUEUE];
+  volatile uint32_t tick;
+  volatile uint32_t wakeup_tick;
+  volatile mrb_bool switching;
+} mrb_task_state;
+#endif
 
 typedef struct mrb_state {
   struct mrb_jmpbuf *jmp;
@@ -312,6 +327,13 @@ typedef struct mrb_state {
   mrb_atexit_func *atexit_stack;
 #endif
   uint16_t atexit_stack_len;
+
+#ifdef MRB_USE_TASK_SCHEDULER
+  struct mrb_context **c_list;
+  uint16_t c_list_len;
+  uint16_t c_list_capa;
+  mrb_task_state task;
+#endif
 } mrb_state;
 
 /**
