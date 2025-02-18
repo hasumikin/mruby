@@ -952,10 +952,20 @@ root_scan_phase(mrb_state *mrb, mrb_gc *gc)
   /* mark exception */
   mrb_gc_mark(mrb, (struct RBasic*)mrb->exc);
 
+#ifdef MRB_USE_TASK_SCHEDULER
+  MRB_TASK_DISABLE_IRQ();
+  if (mrb->c_list) {
+    for (int i = 0; i < mrb->c_list_len; i++) {
+      mark_context(mrb, mrb->c_list[i]);
+    }
+  }
+  MRB_TASK_ENABLE_IRQ();
+#else
   mark_context(mrb, mrb->c);
   if (mrb->root_c != mrb->c) {
     mark_context(mrb, mrb->root_c);
   }
+#endif
 }
 
 static void
@@ -1000,6 +1010,8 @@ clear_error_object(mrb_state *mrb, struct RObject *obj)
 static void
 final_marking_phase(mrb_state *mrb, mrb_gc *gc)
 {
+  MRB_TASK_DISABLE_IRQ();
+
   int i, e;
 
   /* mark arena */
@@ -1019,6 +1031,8 @@ final_marking_phase(mrb_state *mrb, mrb_gc *gc)
 #ifdef MRB_GC_FIXED_ARENA
   clear_error_object(mrb, mrb->arena_err);
 #endif
+
+  MRB_TASK_ENABLE_IRQ();
 
   gc_mark_gray_list(mrb, gc);
   mrb_assert(gc->gray_list == NULL);
