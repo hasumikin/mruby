@@ -207,6 +207,10 @@ struct mrb_context {
 
   enum mrb_fiber_state status : 4;
   mrb_bool vmexec : 1;
+#ifdef MRB_USE_TASK_SCHEDULER
+  mrb_bool task_stop : 1;
+  mrb_bool is_task: 1;
+#endif
   struct RFiber *fib;
 };
 
@@ -324,6 +328,10 @@ typedef struct mrb_state {
   mrb_atexit_func *atexit_stack;
 #endif
   uint16_t atexit_stack_len;
+
+#ifdef MRB_USE_TASK_SCHEDULER
+  volatile mrb_bool task_switch;
+#endif
 } mrb_state;
 
 /**

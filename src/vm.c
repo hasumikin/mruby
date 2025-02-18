@@ -22,6 +22,15 @@
 #include <mruby/internal.h>
 #include <mruby/presym.h>
 
+#ifdef PICORB_VM_MRUBY
+#ifndef MRB_USE_TASK_SCHEDULER
+#define MRB_USE_TASK_SCHEDULER
+#endif
+#ifndef MRB_USE_VM_SWITCH_DISPATCH
+#define MRB_USE_VM_SWITCH_DISPATCH
+#endif
+#endif
+
 #ifdef MRB_NO_STDIO
 #if defined(__cplusplus)
 extern "C" {
@@ -1310,7 +1319,17 @@ prepare_tagged_break(mrb_state *mrb, uint32_t tag, const mrb_callinfo *return_ci
 #define CASE(insn,ops) case insn: { const mrb_code *pc = ci->pc+1; FETCH_ ## ops (); ci->pc = pc; } L_ ## insn ## _BODY:
 #define NEXT goto L_END_DISPATCH
 #define JUMP NEXT
-#define END_DISPATCH L_END_DISPATCH:;}}
+#ifdef MRB_USE_TASK_SCHEDULER
+  #define END_DISPATCH L_END_DISPATCH: \
+    if (mrb->task_switch) return mrb_nil_value();}}
+  #define TASK_SWITCH(mrb) do { \
+      mrb->task_switch = TRUE; \
+      mrb->c->task_stop = TRUE; \
+    } while (0)
+#else
+  #define END_DISPATCH L_END_DISPATCH:;}}
+  #define TASK_SWITCH(mrb)
+#endif
 
 #else
 
@@ -1320,6 +1339,7 @@ prepare_tagged_break(mrb_state *mrb, uint32_t tag, const mrb_callinfo *return_ci
 #define JUMP NEXT
 
 #define END_DISPATCH
+#define TASK_SWITCH(mrb)
 
 #endif
 
@@ -2358,14 +2378,19 @@ RETRY_TRY_BLOCK:
       CHECKPOINT_END(RBREAK_TAG_BREAK);
       mrb->exc = NULL; /* clear break object */
 
-      if (ci == mrb->c->cibase) {
-        struct mrb_context *c = mrb->c;
-        if (c == mrb->root_c) {
-          /* toplevel return */
+      if (ci == mrb->c->cibase) { struct mrb_context *c = mrb->c; if (c == mrb->root_c) { /* toplevel return */
           mrb_gc_arena_restore(mrb, ai);
           mrb->jmp = prev_jmp;
           return v;
         }
+
+#ifdef MRB_USE_TASK_SCHEDULER
+        if (mrb->c->is_task) {
+          mrb_gc_arena_restore(mrb, ai);
+          TASK_SWITCH(mrb);
+          return v;
+        }
+#endif
 
         fiber_terminate(mrb, c, ci);
         if (c->vmexec ||
@@ -3063,6 +3088,7 @@ RETRY_TRY_BLOCK:
       }
       CHECKPOINT_END(RBREAK_TAG_STOP);
       mrb->jmp = prev_jmp;
+      TASK_SWITCH(mrb);
       if (!mrb_nil_p(v)) {
         mrb->exc = mrb_obj_ptr(v);
         return v;
