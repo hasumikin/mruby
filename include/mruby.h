@@ -195,6 +195,10 @@ enum mrb_fiber_state {
   MRB_FIBER_SUSPENDED,
   MRB_FIBER_TRANSFERRED,
   MRB_FIBER_TERMINATED,
+#ifdef MRB_USE_TASK_SCHEDULER
+  MRB_TASK_CREATED,
+  MRB_TASK_STOPPED,
+#endif
 };
 
 struct mrb_context {
@@ -324,6 +328,10 @@ typedef struct mrb_state {
   mrb_atexit_func *atexit_stack;
 #endif
   uint16_t atexit_stack_len;
+
+#ifdef MRB_USE_TASK_SCHEDULER
+  volatile mrb_bool task_switch;
+#endif
 } mrb_state;
 
 /**
