@@ -256,6 +256,17 @@ struct mrb_jmpbuf;
 
 typedef void (*mrb_atexit_func)(struct mrb_state*);
 
+#ifdef MRB_USE_TASK_SCHEDULER
+#define MRB_NUM_TASK_QUEUE 4
+typedef struct RTcb mrb_tcb;
+typedef struct mrb_task_state {
+  mrb_tcb *queues[MRB_NUM_TASK_QUEUE];
+  volatile uint32_t tick;
+  volatile uint32_t wakeup_tick;
+  volatile mrb_bool switching;
+} mrb_task_state;
+#endif
+
 typedef struct mrb_state {
   struct mrb_jmpbuf *jmp;
 
@@ -331,7 +342,7 @@ typedef struct mrb_state {
   uint16_t atexit_stack_len;
 
 #ifdef MRB_USE_TASK_SCHEDULER
-  volatile mrb_bool task_switch;
+  mrb_task_state task;
 #endif
 } mrb_state;
 
