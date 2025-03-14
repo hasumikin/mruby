@@ -342,6 +342,8 @@ typedef struct mrb_state {
   uint16_t atexit_stack_len;
 
 #ifdef MRB_USE_TASK_SCHEDULER
+  struct mrb_context **c_list;
+  size_t c_list_len;
   mrb_task_state task;
 #endif
 } mrb_state;
