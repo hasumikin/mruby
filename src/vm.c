@@ -1323,8 +1323,10 @@ prepare_tagged_break(mrb_state *mrb, uint32_t tag, const mrb_callinfo *return_ci
 #define JUMP NEXT
 #ifdef MRB_USE_TASK_SCHEDULER
   #define END_DISPATCH L_END_DISPATCH: \
-    if (mrb->task.switching && !mrb->gc.iterating) return mrb_nil_value();}}
-  #define TASK_STOP(mrb) if (mrb->c->status == MRB_TASK_CREATED) mrb->c->status = MRB_TASK_STOPPED;
+    if (mrb->task.switching) return mrb_nil_value();}}
+  #define TASK_STOP(mrb) mrb_gc_arena_restore(mrb, ai); \
+    if (mrb->c->status == MRB_TASK_CREATED) mrb->c->status = MRB_TASK_STOPPED;
+
 #else
   #define END_DISPATCH L_END_DISPATCH:;}}
   #define TASK_STOP(mrb)
@@ -2398,7 +2400,6 @@ RETRY_TRY_BLOCK:
 #ifdef MRB_USE_TASK_SCHEDULER
         mrb_assert(MRB_TASK_CREATED < mrb->c->status);
         if (mrb->c->status == MRB_TASK_CREATED) {
-          mrb_gc_arena_restore(mrb, ai);
           TASK_STOP(mrb);
           return v;
         }
