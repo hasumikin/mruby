@@ -1323,7 +1323,7 @@ prepare_tagged_break(mrb_state *mrb, uint32_t tag, const mrb_callinfo *return_ci
 #define JUMP NEXT
 #ifdef MRB_USE_TASK_SCHEDULER
   #define END_DISPATCH L_END_DISPATCH: \
-    if (mrb->task.switching) return mrb_nil_value();}}
+    if (mrb->task.switching || mrb->exc) return mrb_nil_value();}}
   #define TASK_STOP(mrb) mrb_gc_arena_restore(mrb, ai); \
     if (mrb->c->status == MRB_TASK_CREATED) mrb->c->status = MRB_TASK_STOPPED;
 
