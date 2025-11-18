@@ -2663,7 +2663,7 @@ RETRY_TRY_BLOCK:
         }
 
 #ifdef MRB_USE_TASK_SCHEDULER
-        mrb_assert(MRB_TASK_CREATED < mrb->c->status);
+        mrb_assert(MRB_TASK_CREATED <= mrb->c->status);
         if (mrb->c->status == MRB_TASK_CREATED) {
           mrb_gc_arena_restore(mrb, ai);
           mrb->jmp = prev_jmp;
