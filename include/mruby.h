@@ -336,6 +336,7 @@ typedef struct mrb_state {
   uint16_t c_list_len;
   uint16_t c_list_capa;
   mrb_task_state task;
+  uint16_t scheduler_lock;
 #endif
 } mrb_state;
 
