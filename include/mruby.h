@@ -206,7 +206,7 @@ struct mrb_context {
 
   enum mrb_fiber_state status : 4;
   mrb_bool vmexec : 1;
-  enum mrb_context_type type : 1;
+  unsigned int type : 1;            /* enum mrb_context_type */
   struct RFiber *fib;
 };
 
