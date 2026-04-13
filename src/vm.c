@@ -2203,6 +2203,14 @@ RETRY_TRY_BLOCK:
           else {
             struct mrb_context *c = mrb->c;
 
+#ifdef MRB_USE_TASK_SCHEDULER
+            if (c->type == MRB_CONTEXT_TASK) {
+              mrb->jmp = prev_jmp;
+              TASK_STOP(mrb);
+              if (!prev_jmp) return mrb_obj_value(mrb->exc);
+              MRB_THROW(prev_jmp);
+            }
+#endif
             fiber_terminate(mrb, c, ci);
             if (mrb_unlikely(!c->vmexec)) goto L_RAISE;
             mrb->jmp = prev_jmp;
