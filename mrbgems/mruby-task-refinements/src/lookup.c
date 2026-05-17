@@ -56,7 +56,7 @@ ref_make_method(uint32_t flags, union mrb_mt_ptr val)
 
 /*
  * Walk the current task's refinement chain looking for a refined method.
- * Returns TRUE and fills *cp/*m if found.
+ * Returns TRUE and fills *cp / *m if found.
  * Registered into mrb_refinement_lookup at gem init.
  */
 int
