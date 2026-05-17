@@ -24,6 +24,7 @@ mrb_mruby_task_refinements_gem_init(mrb_state *mrb)
   /* Wire the task lifecycle hooks into mruby-task */
   mrb_task_refinements_on_spawn_fn   = mrb_refinements_on_task_spawn;
   mrb_task_refinements_on_destroy_fn = mrb_refinements_on_task_destroy;
+  mrb_task_refinements_on_init_fn    = mrb_refinements_on_task_init;
 
   /* Define Ruby classes and methods */
   mrb_task_refinements_refinement_init(mrb);
@@ -36,4 +37,5 @@ mrb_mruby_task_refinements_gem_final(mrb_state *mrb)
   mrb_refinement_lookup              = NULL;
   mrb_task_refinements_on_spawn_fn   = NULL;
   mrb_task_refinements_on_destroy_fn = NULL;
+  mrb_task_refinements_on_init_fn    = NULL;
 }

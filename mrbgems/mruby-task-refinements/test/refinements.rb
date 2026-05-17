@@ -123,6 +123,17 @@ assert("Spawn copy: child inherits parent refinements") do
   assert_equal "HELLO!!", r
 end
 
+assert("Task.new using: applies refinements before first run") do
+  r = nil
+  done = false
+  Task.new(using: [Ext1]) do
+    r = "hello".shout
+    done = true
+  end
+  while !done; Task.pass; end
+  assert_equal "HELLO!!", r
+end
+
 assert("Independence after spawn: parent new using does not affect already-spawned child") do
   r = nil
   parent_done = false
@@ -144,28 +155,20 @@ assert("Independence after spawn: parent new using does not affect already-spawn
   assert_equal "HELLO!!", r
 end
 
-assert("Cross-task using: applying refinement to another task from outside") do
+assert("Task.new using: later refinements win") do
   r = nil
   done = false
-  worker_ready = false
-  t_worker = Task.new do
-    worker_ready = true
-    Task.pass
-    begin
-      r = "hello".shout
-    rescue => e
-      r = [e.class.to_s, e.message]
-    end
+  Task.new(using: [Ext1, Ext2]) do
+    r = "hello".shout
     done = true
   end
-  while !worker_ready; Task.pass; end
-  begin
-    t_worker.using Ext1
-  rescue => e
-    r = [e.class.to_s, e.message]
-  end
   while !done; Task.pass; end
-  assert_equal "HELLO!!", r
+  assert_equal "HELLO??", r
+end
+
+assert("using on another task raises ArgumentError") do
+  t = Task.new {}
+  assert_raise(ArgumentError) { t.using Ext1 }
 end
 
 assert("using on dormant task raises TypeError") do

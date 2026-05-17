@@ -10,6 +10,8 @@
 #include <mruby/array.h>
 #include <mruby/variable.h>
 #include <mruby/error.h>
+#include <stddef.h>
+#include <stdint.h>
 #include "task.h"
 #include <mruby/refinements.h>
 
@@ -158,9 +160,32 @@ mrb_refinements_on_task_destroy(mrb_state *mrb, struct mrb_context *ctx)
   mrb_mc_clear_by_ctx(mrb, ctx);
 }
 
+void
+mrb_refinements_on_task_init(mrb_state *mrb, struct mrb_context *ctx,
+                             mrb_value mods)
+{
+  if (mrb_nil_p(mods)) return;
+  if (!mrb_array_p(mods)) {
+    mrb_raise(mrb, E_TYPE_ERROR, "using must be an Array");
+  }
+
+  for (mrb_int i = 0; i < RARRAY_LEN(mods); i++) {
+    mrb_context_using(mrb, ctx, mrb_ary_ref(mrb, mods, i));
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* Ruby methods: Task#using, Task#unusing, Task#active_refinements     */
 /* ------------------------------------------------------------------ */
+
+static mrb_task *
+current_task(mrb_state *mrb)
+{
+  if (mrb->c == mrb->root_c) {
+    return mrb->task.main_task;
+  }
+  return (mrb_task *)((uint8_t *)mrb->c - offsetof(mrb_task, c));
+}
 
 static mrb_task *
 get_task_checked(mrb_state *mrb, mrb_value self)
@@ -180,7 +205,11 @@ task_using(mrb_state *mrb, mrb_value self)
   mrb_value mod;
   mrb_get_args(mrb, "o", &mod);
   mrb_task *t = get_task_checked(mrb, self);
-  mrb_context_using(mrb, &t->c, mod);
+  mrb_task *current = current_task(mrb);
+  if (t != current) {
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "cannot call using on another task");
+  }
+  mrb_context_using(mrb, mrb->c, mod);
   return self;
 }
 
@@ -190,7 +219,11 @@ task_unusing(mrb_state *mrb, mrb_value self)
   mrb_value mod;
   mrb_get_args(mrb, "o", &mod);
   mrb_task *t = get_task_checked(mrb, self);
-  mrb_context_unusing(mrb, &t->c, mod);
+  mrb_task *current = current_task(mrb);
+  if (t != current) {
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "cannot call unusing on another task");
+  }
+  mrb_context_unusing(mrb, mrb->c, mod);
   return self;
 }
 

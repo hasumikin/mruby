@@ -151,6 +151,9 @@ extern void (*mrb_task_refinements_on_spawn_fn)(mrb_state *mrb,
                                                 struct mrb_context *parent);
 extern void (*mrb_task_refinements_on_destroy_fn)(mrb_state *mrb,
                                                   struct mrb_context *ctx);
+extern void (*mrb_task_refinements_on_init_fn)(mrb_state *mrb,
+                                               struct mrb_context *ctx,
+                                               mrb_value mods);
 
 /*
  * Internal helpers - used by task.c and task_queue.c

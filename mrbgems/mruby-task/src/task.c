@@ -70,6 +70,8 @@ const struct mrb_data_type mrb_task_type = {
 void (*mrb_task_refinements_on_spawn_fn)(mrb_state *, struct mrb_context *,
                                          struct mrb_context *) = NULL;
 void (*mrb_task_refinements_on_destroy_fn)(mrb_state *, struct mrb_context *) = NULL;
+void (*mrb_task_refinements_on_init_fn)(mrb_state *, struct mrb_context *,
+                                        mrb_value) = NULL;
 
 /*
  * GC marking function for all tasks
@@ -764,10 +766,10 @@ mrb_task_s_new(mrb_state *mrb, mrb_value self)
   mrb_value blk;
   mrb_value name_val = mrb_nil_value();
   mrb_int priority = 128;  /* Default middle priority */
-  mrb_value kw_values[2] = {mrb_undef_value(), mrb_undef_value()};
-  mrb_sym kw_names[2] = {MRB_SYM(name), MRB_SYM(priority)};
+  mrb_value kw_values[3] = {mrb_undef_value(), mrb_undef_value(), mrb_undef_value()};
+  mrb_sym kw_names[3] = {MRB_SYM(name), MRB_SYM(priority), MRB_SYM(using)};
   const mrb_kwargs kwargs = {
-    2, 0, kw_names, kw_values, NULL
+    3, 0, kw_names, kw_values, NULL
   };
 
   /* Get block and optional keyword arguments */
@@ -795,12 +797,22 @@ mrb_task_s_new(mrb_state *mrb, mrb_value self)
       mrb_raise(mrb, E_ARGUMENT_ERROR, "priority must be 0-255");
     }
   }
+  mrb_value using_mods = mrb_nil_value();
+  if (!mrb_undef_p(kw_values[2])) {
+    using_mods = kw_values[2];
+  }
 
   mrb_task *t = task_create_common(mrb, proc, name_val, (uint8_t)priority);
 
   /* Notify refinements gem about spawn (shallow-copies parent chain if set) */
   if (mrb_task_refinements_on_spawn_fn) {
     mrb_task_refinements_on_spawn_fn(mrb, &t->c, mrb->c);
+  }
+  if (!mrb_nil_p(using_mods)) {
+    if (!mrb_task_refinements_on_init_fn) {
+      mrb_raise(mrb, E_ARGUMENT_ERROR, "using keyword requires mruby-task-refinements");
+    }
+    mrb_task_refinements_on_init_fn(mrb, &t->c, using_mods);
   }
 
   return t->self;
@@ -1610,7 +1622,7 @@ mrb_mruby_task_gem_init(mrb_state *mrb)
   mrb_init_task_queue(mrb, task_class);
 
   /* Class methods */
-  mrb_define_class_method_id(mrb, task_class, MRB_SYM(new),     mrb_task_s_new,     MRB_ARGS_KEY(2,0)|MRB_ARGS_BLOCK());
+  mrb_define_class_method_id(mrb, task_class, MRB_SYM(new),     mrb_task_s_new,     MRB_ARGS_KEY(3,0)|MRB_ARGS_BLOCK());
   mrb_define_class_method_id(mrb, task_class, MRB_SYM(current), mrb_task_s_current, MRB_ARGS_NONE());
   mrb_define_class_method_id(mrb, task_class, MRB_SYM(list),    mrb_task_s_list,    MRB_ARGS_NONE());
   mrb_define_class_method_id(mrb, task_class, MRB_SYM(pass),    mrb_task_s_pass,    MRB_ARGS_NONE());

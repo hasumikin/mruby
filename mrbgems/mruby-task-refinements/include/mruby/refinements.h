@@ -59,11 +59,15 @@ int mrb_refinements_find(mrb_state *mrb, struct RClass *c,
 void mrb_refinements_on_task_spawn(mrb_state *mrb, struct mrb_context *child,
                                    struct mrb_context *parent);
 void mrb_refinements_on_task_destroy(mrb_state *mrb, struct mrb_context *ctx);
+void mrb_refinements_on_task_init(mrb_state *mrb, struct mrb_context *ctx,
+                                  mrb_value mods);
 
 /* Function pointer slots used by mruby-task (set if gem is loaded) */
 extern void (*mrb_task_refinements_on_spawn_fn)(mrb_state *, struct mrb_context *,
                                                 struct mrb_context *);
 extern void (*mrb_task_refinements_on_destroy_fn)(mrb_state *, struct mrb_context *);
+extern void (*mrb_task_refinements_on_init_fn)(mrb_state *, struct mrb_context *,
+                                               mrb_value);
 
 #endif /* MRB_USE_TASK_REFINEMENTS */
 #endif /* MRUBY_REFINEMENTS_H */
