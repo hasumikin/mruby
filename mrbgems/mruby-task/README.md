@@ -851,7 +851,44 @@ Planned features not yet implemented:
 
 MIT License (same as mruby)
 
+## Optional Extensions
+
+### mruby-task-refinements
+
+`mruby-task-refinements` adds task-scoped dynamic refinements to `mruby-task`.
+When loaded, each task can activate refined method overrides that are invisible
+to all other tasks.
+
+```ruby
+module MyExt
+  refine String do
+    def shout
+      upcase + "!!"
+    end
+  end
+end
+
+# Activate refinement inside a task only
+Task.new do
+  Task.current.using MyExt
+  puts "hello".shout   # => "HELLO!!"
+end
+
+# Apply refinements at Task creation time
+Task.new(using: [MyExt]) do
+  puts "hello".shout   # => "HELLO!!"
+end
+```
+
+The `using:` keyword accepted by `Task.new` pre-activates the listed modules
+before the task's first instruction runs. This is equivalent to calling
+`Task.current.using mod` at the very top of the block, and the modules are
+applied in order (last wins on the same target class).
+
+See `mruby-task-refinements/README.md` for full documentation.
+
 ## See Also
 
 - `mruby-fiber`: Cooperative fibers with manual control
 - `mruby-sleep`: Blocking sleep (superseded by mruby-task)
+- `mruby-task-refinements`: Task-scoped dynamic method refinements
