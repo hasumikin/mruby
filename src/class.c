@@ -2784,19 +2784,36 @@ mrb_method_t
 mrb_vm_find_method(mrb_state *mrb, struct RClass *c, struct RClass **cp, mrb_sym mid)
 {
   mrb_method_t m;
+#ifdef MRB_USE_TASK_REFINEMENTS
+  if (mrb_refinement_lookup && mrb->c->refinements) {
+    if (mrb_refinement_lookup(mrb, c, mid, cp, &m)) return m;
+  }
+#endif
 #ifndef MRB_NO_METHOD_CACHE
   struct RClass *oc = c;
-  int h = mrb_int_hash_func(mrb, ((intptr_t)oc >> 4) ^ mid) & (MRB_METHOD_CACHE_SIZE/2-1);
+  int h = mrb_int_hash_func(mrb, ((intptr_t)oc >> 4) ^ mid
+#ifdef MRB_USE_TASK_REFINEMENTS
+    ^ ((intptr_t)mrb->c >> 4)
+#endif
+    ) & (MRB_METHOD_CACHE_SIZE/2-1);
   struct mrb_cache_entry *mc = &mrb->cache[h * 2];
 
   /* check way 0 */
-  if (mc->c == c && mc->mid == mid) {
+  if (mc->c == c && mc->mid == mid
+#ifdef MRB_USE_TASK_REFINEMENTS
+    && mc->ctx == mrb->c
+#endif
+      ) {
     *cp = mc->c0;
     return mc->m;
   }
   /* check way 1 */
   mc++;
-  if (mc->c == c && mc->mid == mid) {
+  if (mc->c == c && mc->mid == mid
+#ifdef MRB_USE_TASK_REFINEMENTS
+    && mc->ctx == mrb->c
+#endif
+      ) {
     *cp = mc->c0;
     return mc->m;
   }
@@ -2820,6 +2837,9 @@ mrb_vm_find_method(mrb_state *mrb, struct RClass *c, struct RClass **cp, mrb_sym
         mc->c0 = c;
         mc->mid = mid;
         mc->m = m;
+#ifdef MRB_USE_TASK_REFINEMENTS
+        mc->ctx = mrb->c;
+#endif
 #endif
         return m;
       }

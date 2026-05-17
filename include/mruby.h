@@ -193,6 +193,10 @@ enum mrb_fiber_state {
 #define MRB_TASK_CREATED MRB_FIBER_CREATED
 #define MRB_TASK_STOPPED MRB_FIBER_TERMINATED
 
+#ifdef MRB_USE_TASK_REFINEMENTS
+struct mrb_refinement_chain; /* defined in mruby/refinements.h */
+#endif
+
 struct mrb_context {
   struct mrb_context *prev;
 
@@ -204,6 +208,9 @@ struct mrb_context {
   enum mrb_fiber_state status : 4;
   mrb_bool vmexec : 1;
   struct RFiber *fib;
+#ifdef MRB_USE_TASK_REFINEMENTS
+  struct mrb_refinement_chain *refinements; /* NULL until first #using */
+#endif
 };
 
 #ifdef MRB_METHOD_CACHE_SIZE
@@ -239,6 +246,9 @@ typedef struct {
 struct mrb_cache_entry {
   struct RClass *c, *c0;
   mrb_sym mid;
+#ifdef MRB_USE_TASK_REFINEMENTS
+  struct mrb_context *ctx;
+#endif
   mrb_method_t m;
 };
 #endif
@@ -258,6 +268,13 @@ struct mrb_const_cache_entry {
   mrb_sym sym;
   mrb_value value;
 };
+
+#ifdef MRB_USE_TASK_REFINEMENTS
+/* Returns non-zero if a refined method was found for (c, mid). */
+typedef int (*mrb_refinement_lookup_fn)(struct mrb_state *mrb, struct RClass *c,
+                                        mrb_sym mid, struct RClass **cp,
+                                        mrb_method_t *m);
+MRB_API mrb_refinement_lookup_fn mrb_refinement_lookup;
 #endif
 
 struct mrb_jmpbuf;

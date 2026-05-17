@@ -62,9 +62,14 @@ mrb_task_free(mrb_state *mrb, void *ptr)
   }
 }
 
-static const struct mrb_data_type mrb_task_type = {
+const struct mrb_data_type mrb_task_type = {
   "Task", mrb_task_free,
 };
+
+/* Optional lifecycle hooks (set by mruby-task-refinements at gem init) */
+void (*mrb_task_refinements_on_spawn_fn)(mrb_state *, struct mrb_context *,
+                                         struct mrb_context *) = NULL;
+void (*mrb_task_refinements_on_destroy_fn)(mrb_state *, struct mrb_context *) = NULL;
 
 /*
  * GC marking function for all tasks
@@ -125,7 +130,6 @@ mrb_task_mark_all(mrb_state *mrb)
       mrb_gc_mark_value(mrb, t->self);
       mrb_gc_mark_value(mrb, t->result);
       mrb_gc_mark_value(mrb, t->name);
-
       t = t->next;
     }
   }
@@ -208,6 +212,9 @@ static inline mrb_bool
 task_cleanup_if_stopped(mrb_state *mrb, mrb_task *t)
 {
   if (t->status == MRB_TASK_STATUS_DORMANT || t->c.status == MRB_TASK_STOPPED) {
+    if (t->c.status == MRB_TASK_STOPPED && mrb_task_refinements_on_destroy_fn) {
+      mrb_task_refinements_on_destroy_fn(mrb, &t->c);
+    }
     /* Task is terminated but still in queue - remove it */
     mrb_task_disable_irq();
     mrb_task_q_delete(mrb, t);
@@ -413,6 +420,9 @@ execute_task(mrb_state *mrb, mrb_task *t)
 
   /* Handle task termination */
   if (t->c.status == MRB_TASK_STOPPED) {
+    if (mrb_task_refinements_on_destroy_fn) {
+      mrb_task_refinements_on_destroy_fn(mrb, &t->c);
+    }
     switching_ = FALSE;
     mrb_task_disable_irq();
     mrb_task_q_delete(mrb, t);
@@ -787,6 +797,12 @@ mrb_task_s_new(mrb_state *mrb, mrb_value self)
   }
 
   mrb_task *t = task_create_common(mrb, proc, name_val, (uint8_t)priority);
+
+  /* Notify refinements gem about spawn (shallow-copies parent chain if set) */
+  if (mrb_task_refinements_on_spawn_fn) {
+    mrb_task_refinements_on_spawn_fn(mrb, &t->c, mrb->c);
+  }
+
   return t->self;
 }
 
@@ -1314,6 +1330,11 @@ mrb_create_task(mrb_state *mrb, struct RProc *proc, mrb_value name, mrb_value pr
 
   mrb_task *t = task_create_common(mrb, proc, name_val, (uint8_t)prio);
 
+  /* Notify refinements gem about spawn (shallow-copies parent chain if set) */
+  if (mrb_task_refinements_on_spawn_fn) {
+    mrb_task_refinements_on_spawn_fn(mrb, &t->c, mrb->c);
+  }
+
   /* Set top_self if provided */
   if (!mrb_nil_p(top_self)) {
     t->c.ci->stack[0] = top_self;
@@ -1426,6 +1447,11 @@ static void
 terminate_task_internal(mrb_state *mrb, mrb_task *t)
 {
   if (t->status == MRB_TASK_STATUS_DORMANT) return;
+
+  /* Notify refinements gem to free chain and clear cache entries */
+  if (mrb_task_refinements_on_destroy_fn) {
+    mrb_task_refinements_on_destroy_fn(mrb, &t->c);
+  }
 
   mrb_task_disable_irq();
   mrb_task_q_delete(mrb, t);

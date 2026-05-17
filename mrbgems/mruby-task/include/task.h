@@ -135,6 +135,24 @@ MRB_API void mrb_task_reset_context(mrb_state *mrb, mrb_value task);
 MRB_API void mrb_task_proc_set(mrb_state *mrb, mrb_value task, struct RProc *proc);
 
 /*
+ * Data type descriptor for Task Ruby objects.
+ * Exported so that dependent gems (e.g. mruby-task-refinements) can call
+ * mrb_data_get_ptr(mrb, task_val, &mrb_task_type) to recover the mrb_task*.
+ */
+MRB_API const struct mrb_data_type mrb_task_type;
+
+/*
+ * Optional lifecycle hooks for mruby-task-refinements.
+ * Both default to NULL.  The refinements gem sets them at its gem_init.
+ * mruby-task calls them when non-NULL, keeping the dependency optional.
+ */
+extern void (*mrb_task_refinements_on_spawn_fn)(mrb_state *mrb,
+                                                struct mrb_context *child,
+                                                struct mrb_context *parent);
+extern void (*mrb_task_refinements_on_destroy_fn)(mrb_state *mrb,
+                                                  struct mrb_context *ctx);
+
+/*
  * Internal helpers - used by task.c and task_queue.c
  */
 #include <stddef.h>
