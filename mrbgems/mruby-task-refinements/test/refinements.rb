@@ -197,3 +197,23 @@ assert("active_refinements returns correct count") do
   while !done; Task.pass; end
   assert_equal 2, r
 end
+
+assert("Mailbox pattern: apply extension delivered via Task::Queue") do
+  mailboxes = {}
+  mailboxes["worker"] = Task::Queue.new
+  r = nil
+
+  Task.new(name: "worker") do
+    my_name = Task.current.name
+    ext = mailboxes[my_name].pop
+    mailboxes[my_name].close
+    mailboxes.delete(my_name)
+    using ext
+    r = "hello".shout
+  end
+
+  Task.new { mailboxes["worker"] << Ext1 }
+  Task.run
+
+  assert_equal "HELLO!!", r
+end
