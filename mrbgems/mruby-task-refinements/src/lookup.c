@@ -55,8 +55,15 @@ ref_make_method(uint32_t flags, union mrb_mt_ptr val)
 }
 
 /*
- * Walk the current task's refinement chain looking for a refined method.
- * Returns TRUE and fills *cp / *m if found.
+ * Look up a refined method for a SINGLE class `c`.
+ * The ancestor walk is the caller's responsibility (mrb_vm_find_method in
+ * mruby/src/class.c) so that a method defined directly on a more specific
+ * class wins over a refinement targeting a higher ancestor (MRI semantics).
+ *
+ * Returns TRUE and fills *cp / *m if a refinement in the current task's
+ * chain targets `c` (or an iclass wrapping target_class equal to `c->c`)
+ * and provides `mid`.
+ *
  * Registered into mrb_refinement_lookup at gem init.
  */
 int
@@ -67,24 +74,18 @@ mrb_refinements_find(mrb_state *mrb, struct RClass *c, mrb_sym mid,
   struct mrb_refinement_chain *node = mrb->c->refinements;
   while (node) {
     struct mrb_refinement *ref = node->ref;
-    /* Check receiver class or any ancestor against the refinement's target */
-    struct RClass *klass = c;
-    while (klass) {
-      mrb_bool match = (klass == ref->target_class) ||
-                       (klass->tt == MRB_TT_ICLASS && klass->c == ref->target_class);
-      if (match) {
-        union mrb_mt_ptr ptr;
-        uint32_t flags;
-        if (ref->methods->mt && ref_mt_get(ref->methods->mt, mid, &ptr, &flags)) {
-          if (ptr.proc != 0) {
-            *cp = ref->methods;
-            *m = ref_make_method(flags, ptr);
-            return TRUE;
-          }
+    mrb_bool match = (c == ref->target_class) ||
+                     (c->tt == MRB_TT_ICLASS && c->c == ref->target_class);
+    if (match) {
+      union mrb_mt_ptr ptr;
+      uint32_t flags;
+      if (ref->methods->mt && ref_mt_get(ref->methods->mt, mid, &ptr, &flags)) {
+        if (ptr.proc != 0) {
+          *cp = ref->methods;
+          *m = ref_make_method(flags, ptr);
+          return TRUE;
         }
-        break;
       }
-      klass = klass->super;
     }
     node = node->next;
   }

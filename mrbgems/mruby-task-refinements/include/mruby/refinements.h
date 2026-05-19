@@ -50,7 +50,12 @@ MRB_API mrb_bool  mrb_context_has_refinements(struct mrb_context *c);
 /* Invalidate all cache entries belonging to ctx */
 MRB_API void mrb_mc_clear_by_ctx(mrb_state *mrb, struct mrb_context *ctx);
 
-/* Hook implementation registered into mrb_refinement_lookup */
+/*
+ * Hook implementation registered into mrb_refinement_lookup.
+ * Checks the current task's refinement chain for `mid` against the SINGLE
+ * class `c` (no ancestor walk). The caller (mrb_vm_find_method) interleaves
+ * this check with the ancestor walk to match MRI semantics.
+ */
 int mrb_refinements_find(mrb_state *mrb, struct RClass *c,
                          mrb_sym mid, struct RClass **cp,
                          mrb_method_t *m);

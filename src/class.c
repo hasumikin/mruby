@@ -2784,11 +2784,6 @@ mrb_method_t
 mrb_vm_find_method(mrb_state *mrb, struct RClass *c, struct RClass **cp, mrb_sym mid)
 {
   mrb_method_t m;
-#ifdef MRB_USE_TASK_REFINEMENTS
-  if (mrb_refinement_lookup && mrb->c->refinements) {
-    if (mrb_refinement_lookup(mrb, c, mid, cp, &m)) return m;
-  }
-#endif
 #ifndef MRB_NO_METHOD_CACHE
   struct RClass *oc = c;
   int h = mrb_int_hash_func(mrb, ((intptr_t)oc >> 4) ^ mid
@@ -2819,7 +2814,26 @@ mrb_vm_find_method(mrb_state *mrb, struct RClass *c, struct RClass **cp, mrb_sym
   }
 #endif
 
+#ifdef MRB_USE_TASK_REFINEMENTS
+  /* Interleave refinement check with the ancestor walk so that a method
+     defined directly on a more specific class wins over a refinement that
+     targets a higher ancestor (matching MRI semantics). */
+  mrb_bool has_refinements =
+    (mrb_refinement_lookup != NULL) && (mrb->c->refinements != NULL);
+#endif
+
   while (c) {
+#ifdef MRB_USE_TASK_REFINEMENTS
+    if (has_refinements) {
+      struct RClass *rcp = c;
+      if (mrb_refinement_lookup(mrb, c, mid, &rcp, &m)) {
+        *cp = rcp;
+        /* Refined hits are not cached: they depend on the per-task
+           refinement chain which can change between calls. */
+        return m;
+      }
+    }
+#endif
     mrb_mt_tbl *h = c->mt;
 
     if (h) {
