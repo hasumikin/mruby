@@ -1,6 +1,8 @@
 /*
 ** mruby/refinements.h - Task-scoped refinements API
 **
+** Part of mruby-task. Enabled by defining MRB_USE_TASK_REFINEMENTS.
+**
 ** See Copyright Notice in mruby.h
 */
 
@@ -60,6 +62,10 @@ int mrb_refinements_find(mrb_state *mrb, struct RClass *c,
                          mrb_sym mid, struct RClass **cp,
                          mrb_method_t *m);
 
+/* Class/method initializers (called from mruby-task gem_init) */
+void mrb_task_refinements_refinement_init(mrb_state *mrb);
+void mrb_task_refinements_context_init(mrb_state *mrb);
+
 /* Lifecycle hooks called from mruby-task */
 void mrb_refinements_on_task_spawn(mrb_state *mrb, struct mrb_context *child,
                                    struct mrb_context *parent);
@@ -67,7 +73,7 @@ void mrb_refinements_on_task_destroy(mrb_state *mrb, struct mrb_context *ctx);
 void mrb_refinements_on_task_init(mrb_state *mrb, struct mrb_context *ctx,
                                   mrb_value mods);
 
-/* Function pointer slots used by mruby-task (set if gem is loaded) */
+/* Function pointer slots used by mruby-task (defined in task.c) */
 extern void (*mrb_task_refinements_on_spawn_fn)(mrb_state *, struct mrb_context *,
                                                 struct mrb_context *);
 extern void (*mrb_task_refinements_on_destroy_fn)(mrb_state *, struct mrb_context *);

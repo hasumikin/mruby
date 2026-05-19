@@ -1,8 +1,12 @@
 /*
 ** refinement.c - Module#refine, Refinement class
 **
+** Compiled into the binary only when MRB_USE_TASK_REFINEMENTS is defined.
+**
 ** See Copyright Notice in mruby.h
 */
+
+#ifdef MRB_USE_TASK_REFINEMENTS
 
 #include <mruby.h>
 #include <mruby/class.h>
@@ -20,7 +24,7 @@ static void refinement_free(mrb_state *mrb, void *p)
   mrb_free(mrb, p);
 }
 
-/* Exported so context.c and other files can use mrb_data_get_ptr with this type */
+/* Exported so refinement_context.c can use mrb_data_get_ptr with this type */
 const mrb_data_type mrb_refinement_type = {
   "Refinement", refinement_free
 };
@@ -136,3 +140,5 @@ mrb_task_refinements_refinement_init(mrb_state *mrb)
   mrb_define_method(mrb, mrb->module_class, "refinements",
                     mod_refinements, MRB_ARGS_NONE());
 }
+
+#endif /* MRB_USE_TASK_REFINEMENTS */

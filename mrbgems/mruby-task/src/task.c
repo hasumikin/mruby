@@ -19,6 +19,9 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include "task.h"
+#ifdef MRB_USE_TASK_REFINEMENTS
+#include <mruby/refinements.h>
+#endif
 
 /* Get task pointer from self with validation */
 #define TASK_GET_PTR_OR_RAISE(var, self) \
@@ -66,7 +69,9 @@ const struct mrb_data_type mrb_task_type = {
   "Task", mrb_task_free,
 };
 
-/* Optional lifecycle hooks (set by mruby-task-refinements at gem init) */
+/* Optional lifecycle hooks for the task-scoped refinements feature.
+ * Wired up in mrb_mruby_task_gem_init when MRB_USE_TASK_REFINEMENTS is defined.
+ * Left as NULL otherwise so the call sites below become cheap NULL checks. */
 void (*mrb_task_refinements_on_spawn_fn)(mrb_state *, struct mrb_context *,
                                          struct mrb_context *) = NULL;
 void (*mrb_task_refinements_on_destroy_fn)(mrb_state *, struct mrb_context *) = NULL;
@@ -812,7 +817,7 @@ mrb_task_s_new(mrb_state *mrb, mrb_value self)
   }
   if (!mrb_nil_p(using_mods)) {
     if (!mrb_task_refinements_on_init_fn) {
-      mrb_raise(mrb, E_ARGUMENT_ERROR, "using keyword requires mruby-task-refinements");
+      mrb_raise(mrb, E_ARGUMENT_ERROR, "using keyword requires MRB_USE_TASK_REFINEMENTS");
     }
     mrb_task_refinements_on_init_fn(mrb, &t->c, using_mods);
   }
@@ -1653,11 +1658,30 @@ mrb_mruby_task_gem_init(mrb_state *mrb)
   mrb_define_module_function_id(mrb, mrb->kernel_module, MRB_SYM(sleep),    mrb_f_sleep,    MRB_ARGS_OPT(1));
   mrb_define_module_function_id(mrb, mrb->kernel_module, MRB_SYM(usleep),   mrb_f_usleep,   MRB_ARGS_REQ(1));
   mrb_define_module_function_id(mrb, mrb->kernel_module, MRB_SYM(sleep_ms), mrb_f_sleep_ms, MRB_ARGS_REQ(1));
+
+#ifdef MRB_USE_TASK_REFINEMENTS
+  /* Wire the method lookup hook into mruby core */
+  mrb_refinement_lookup              = mrb_refinements_find;
+  /* Wire the task lifecycle hooks */
+  mrb_task_refinements_on_spawn_fn   = mrb_refinements_on_task_spawn;
+  mrb_task_refinements_on_destroy_fn = mrb_refinements_on_task_destroy;
+  mrb_task_refinements_on_init_fn    = mrb_refinements_on_task_init;
+  /* Define Ruby classes and methods (Refinement, Module#refine, Task#using, ...) */
+  mrb_task_refinements_refinement_init(mrb);
+  mrb_task_refinements_context_init(mrb);
+#endif
 }
 
 void
 mrb_mruby_task_gem_final(mrb_state *mrb)
 {
+#ifdef MRB_USE_TASK_REFINEMENTS
+  mrb_refinement_lookup              = NULL;
+  mrb_task_refinements_on_spawn_fn   = NULL;
+  mrb_task_refinements_on_destroy_fn = NULL;
+  mrb_task_refinements_on_init_fn    = NULL;
+#endif
+
   /* Clear main task pointer - GC will handle freeing the object */
   if (mrb->task.main_task) {
     mrb_gc_unregister(mrb, mrb->task.main_task->self);

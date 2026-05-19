@@ -1,8 +1,13 @@
 /*
-** context.c - Per-task refinement chain management and Task Ruby methods
+** refinement_context.c - Per-task refinement chain management and
+**                        Task Ruby methods (using/unusing/active_refinements)
+**
+** Compiled into the binary only when MRB_USE_TASK_REFINEMENTS is defined.
 **
 ** See Copyright Notice in mruby.h
 */
+
+#ifdef MRB_USE_TASK_REFINEMENTS
 
 #include <mruby.h>
 #include <mruby/class.h>
@@ -272,3 +277,5 @@ mrb_task_refinements_context_init(mrb_state *mrb)
   mrb_define_method(mrb, task_class, "active_refinements",
                     task_active_refinements, MRB_ARGS_NONE());
 }
+
+#endif /* MRB_USE_TASK_REFINEMENTS */

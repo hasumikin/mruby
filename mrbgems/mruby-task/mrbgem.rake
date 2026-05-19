@@ -5,6 +5,7 @@ MRuby::Gem::Specification.new('mruby-task') do |spec|
 
   # Enable task scheduler globally (required for vm.c integration)
   spec.build.defines << 'MRB_USE_TASK_SCHEDULER'
+  spec.build.defines << 'MRB_USE_TASK_REFINEMENTS'
 
   if spec.for_windows?
     spec.linker.libraries << "winmm"

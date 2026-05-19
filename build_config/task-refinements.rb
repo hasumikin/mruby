@@ -9,7 +9,9 @@ MRuby::Build.new('task-refinements') do |conf|
   end
 
   conf.gem core: 'mruby-bin-mruby'
-  conf.gem core: 'mruby-task-refinements'
+  # mruby-task is auto-loaded by the HAL gem dependency. Enable the
+  # task-scoped refinements built into mruby-task.
+  conf.cc.defines << 'MRB_USE_TASK_REFINEMENTS'
 
   conf.enable_test
 end

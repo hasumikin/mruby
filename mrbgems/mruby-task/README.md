@@ -851,13 +851,14 @@ Planned features not yet implemented:
 
 MIT License (same as mruby)
 
-## Optional Extensions
+## Optional Features
 
-### mruby-task-refinements
+### Task-scoped Refinements (`MRB_USE_TASK_REFINEMENTS`)
 
-`mruby-task-refinements` adds task-scoped dynamic refinements to `mruby-task`.
-When loaded, each task can activate refined method overrides that are invisible
-to all other tasks.
+`mruby-task` ships with optional task-scoped dynamic refinements. Enable them
+by adding `conf.cc.defines << 'MRB_USE_TASK_REFINEMENTS'` to your build
+config. When enabled, each task can activate refined method overrides that
+are invisible to all other tasks.
 
 ```ruby
 module MyExt
@@ -885,10 +886,11 @@ before the task's first instruction runs. This is equivalent to calling
 `Task.current.using mod` at the very top of the block, and the modules are
 applied in order (last wins on the same target class).
 
-See `mruby-task-refinements/README.md` for full documentation.
+Method lookup interleaves refinement checks with the regular ancestor walk
+(matching MRI semantics): a method defined directly on a more specific class
+wins over a refinement targeting a higher ancestor such as `Kernel`.
 
 ## See Also
 
 - `mruby-fiber`: Cooperative fibers with manual control
 - `mruby-sleep`: Blocking sleep (superseded by mruby-task)
-- `mruby-task-refinements`: Task-scoped dynamic method refinements

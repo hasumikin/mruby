@@ -1,14 +1,23 @@
 /*
-** lookup.c - Refinement chain walk and method cache helpers
+** refinement_lookup.c - Refinement chain walk and method cache helpers
+**
+** Compiled into the binary only when MRB_USE_TASK_REFINEMENTS is defined.
 **
 ** See Copyright Notice in mruby.h
 */
+
+#ifdef MRB_USE_TASK_REFINEMENTS
 
 #include <mruby.h>
 #include <mruby/class.h>
 #include <mruby/proc.h>
 #include <mruby/error.h>
 #include <mruby/refinements.h>
+
+/* Storage for the function pointer hook used by mrb_vm_find_method in
+   mruby/src/class.c. Set to mrb_refinements_find at gem init and cleared at
+   gem final (see task.c). */
+mrb_refinement_lookup_fn mrb_refinement_lookup = NULL;
 
 /* Invalidate all cache entries that belong to ctx */
 MRB_API void
@@ -91,3 +100,5 @@ mrb_refinements_find(mrb_state *mrb, struct RClass *c, mrb_sym mid,
   }
   return FALSE;
 }
+
+#endif /* MRB_USE_TASK_REFINEMENTS */
