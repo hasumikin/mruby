@@ -60,8 +60,8 @@ mod_refine(mrb_state *mrb, mrb_value self)
   mrb_value blk;
   mrb_get_args(mrb, "C&!", &target_val, &blk);
 
-  if (mrb_type(target_val) != MRB_TT_CLASS) {
-    mrb_raise(mrb, E_TYPE_ERROR, "refine target must be a Class");
+  if (mrb_type(target_val) != MRB_TT_CLASS && mrb_type(target_val) != MRB_TT_MODULE) {
+    mrb_raise(mrb, E_TYPE_ERROR, "refine target must be a Class or Module");
   }
 
   struct RClass *owner  = mrb_class_ptr(self);

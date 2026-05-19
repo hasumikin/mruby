@@ -70,7 +70,9 @@ mrb_refinements_find(mrb_state *mrb, struct RClass *c, mrb_sym mid,
     /* Check receiver class or any ancestor against the refinement's target */
     struct RClass *klass = c;
     while (klass) {
-      if (klass == ref->target_class) {
+      mrb_bool match = (klass == ref->target_class) ||
+                       (klass->tt == MRB_TT_ICLASS && klass->c == ref->target_class);
+      if (match) {
         union mrb_mt_ptr ptr;
         uint32_t flags;
         if (ref->methods->mt && ref_mt_get(ref->methods->mt, mid, &ptr, &flags)) {
