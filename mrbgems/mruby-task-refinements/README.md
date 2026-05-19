@@ -62,15 +62,6 @@ Task.new do
 end
 ```
 
-### Via `Kernel#using` (no explicit receiver)
-
-```ruby
-Task.new do
-  using MyExt          # same as Task.current.using MyExt
-  puts "hello".shout  # => "HELLO!!"
-end
-```
-
 ### At task creation time
 
 ```ruby

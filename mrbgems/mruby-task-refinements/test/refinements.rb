@@ -177,14 +177,6 @@ assert("using on dormant task raises TypeError") do
   assert_raise(TypeError) { t_done.using Ext1 }
 end
 
-assert("Kernel#using (no receiver) works") do
-  r = nil
-  done = false
-  Task.new { using Ext1; r = "hello".shout; done = true }
-  while !done; Task.pass; end
-  assert_equal "HELLO!!", r
-end
-
 assert("active_refinements returns correct count") do
   r = nil
   done = false
@@ -198,6 +190,40 @@ assert("active_refinements returns correct count") do
   assert_equal 2, r
 end
 
+module KernelGreet
+  refine Kernel do
+    def greet
+      "refined kernel"
+    end
+  end
+end
+
+class GreetHost
+  def self.greet
+    "host singleton"
+  end
+end
+
+assert("Direct method on receiver class wins over refinement of an ancestor") do
+  r_singleton = nil
+  r_kernel = nil
+  done = false
+  Task.new do
+    Task.current.using KernelGreet
+    # GreetHost is a Class. Its singleton class chain eventually includes
+    # Kernel (via Object). The refinement targets Kernel#greet, but
+    # GreetHost has a direct singleton-class `greet`; that must win.
+    r_singleton = GreetHost.greet
+    # For a plain Object whose chain has no other `greet`, the refinement
+    # must still apply when walking up to Kernel.
+    r_kernel = Object.new.greet
+    done = true
+  end
+  while !done; Task.pass; end
+  assert_equal "host singleton", r_singleton
+  assert_equal "refined kernel", r_kernel
+end
+
 assert("Mailbox pattern: apply extension delivered via Task::Queue") do
   mailboxes = {}
   mailboxes["worker"] = Task::Queue.new
@@ -208,7 +234,7 @@ assert("Mailbox pattern: apply extension delivered via Task::Queue") do
     ext = mailboxes[my_name].pop
     mailboxes[my_name].close
     mailboxes.delete(my_name)
-    using ext
+    Task.current.using ext
     r = "hello".shout
   end
 
