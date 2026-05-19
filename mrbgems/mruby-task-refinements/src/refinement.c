@@ -15,6 +15,8 @@
 
 static void refinement_free(mrb_state *mrb, void *p)
 {
+  struct mrb_refinement *ref = (struct mrb_refinement *)p;
+  mrb_gc_unregister(mrb, mrb_obj_value(ref->methods));
   mrb_free(mrb, p);
 }
 
@@ -45,6 +47,9 @@ mrb_refinement_new(mrb_state *mrb, struct RClass *owner, struct RClass *target)
   ref->target_class = target;
   ref->methods = methods;
   ref->owner = owner;
+
+  /* methods has no Ruby-level reference; pin it so GC does not collect it */
+  mrb_gc_register(mrb, mrb_obj_value(methods));
 
   struct RClass *ref_class = mrb_class_get(mrb, "Refinement");
   return mrb_obj_value(mrb_data_object_alloc(mrb, ref_class, ref, &mrb_refinement_type));

@@ -249,8 +249,10 @@ task_init_context(mrb_state *mrb, mrb_task *t, const struct RProc *proc)
 {
   static const struct mrb_context mrb_context_zero = { 0 };
   struct mrb_context *c = &t->c;
+  struct mrb_refinement_chain *refinements = c->refinements;
 
   *c = mrb_context_zero;
+  c->refinements = refinements;
 
   /* Initialize VM stack */
   size_t slen = TASK_STACK_INIT_SIZE;
