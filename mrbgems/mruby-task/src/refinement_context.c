@@ -210,9 +210,12 @@ task_using(mrb_state *mrb, mrb_value self)
   mrb_value mod;
   mrb_get_args(mrb, "o", &mod);
   mrb_task *t = get_task_checked(mrb, self);
+  if (mrb->c == mrb->root_c) {
+    mrb_raise(mrb, E_RUNTIME_ERROR, "Task#using can only be called from within the task itself");
+  }
   mrb_task *current = current_task(mrb);
   if (t != current) {
-    mrb_raise(mrb, E_ARGUMENT_ERROR, "cannot call using on another task");
+    mrb_raise(mrb, E_RUNTIME_ERROR, "Task#using can only be called from within the task itself");
   }
   mrb_context_using(mrb, mrb->c, mod);
   return self;
@@ -224,9 +227,12 @@ task_unusing(mrb_state *mrb, mrb_value self)
   mrb_value mod;
   mrb_get_args(mrb, "o", &mod);
   mrb_task *t = get_task_checked(mrb, self);
+  if (mrb->c == mrb->root_c) {
+    mrb_raise(mrb, E_RUNTIME_ERROR, "Task#unusing can only be called from within the task itself");
+  }
   mrb_task *current = current_task(mrb);
   if (t != current) {
-    mrb_raise(mrb, E_ARGUMENT_ERROR, "cannot call unusing on another task");
+    mrb_raise(mrb, E_RUNTIME_ERROR, "Task#unusing can only be called from within the task itself");
   }
   mrb_context_unusing(mrb, mrb->c, mod);
   return self;
@@ -270,12 +276,9 @@ void
 mrb_task_refinements_context_init(mrb_state *mrb)
 {
   struct RClass *task_class = mrb_class_get(mrb, "Task");
-  mrb_define_method(mrb, task_class, "using",
-                    task_using,              MRB_ARGS_REQ(1));
-  mrb_define_method(mrb, task_class, "unusing",
-                    task_unusing,            MRB_ARGS_REQ(1));
-  mrb_define_method(mrb, task_class, "active_refinements",
-                    task_active_refinements, MRB_ARGS_NONE());
+  mrb_define_method(mrb, task_class, "using",              task_using,              MRB_ARGS_REQ(1));
+  mrb_define_method(mrb, task_class, "unusing",            task_unusing,            MRB_ARGS_REQ(1));
+  mrb_define_method(mrb, task_class, "active_refinements", task_active_refinements, MRB_ARGS_NONE());
 }
 
 #endif /* MRB_USE_TASK_REFINEMENTS */

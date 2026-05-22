@@ -166,9 +166,9 @@ assert("Task.new using: later refinements win") do
   assert_equal "HELLO??", r
 end
 
-assert("using on another task raises ArgumentError") do
+assert("using outside task context raises RuntimeError") do
   t = Task.new {}
-  assert_raise(ArgumentError) { t.using Ext1 }
+  assert_raise(RuntimeError) { t.using Ext1 }
 end
 
 assert("using on dormant task raises TypeError") do
