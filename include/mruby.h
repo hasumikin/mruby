@@ -268,6 +268,7 @@ struct mrb_const_cache_entry {
   mrb_sym sym;
   mrb_value value;
 };
+#endif
 
 #ifdef MRB_USE_TASK_REFINEMENTS
 /* Returns non-zero if a refined method was found for (c, mid). */
