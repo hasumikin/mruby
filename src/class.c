@@ -2819,14 +2819,14 @@ mrb_vm_find_method(mrb_state *mrb, struct RClass *c, struct RClass **cp, mrb_sym
      defined directly on a more specific class wins over a refinement that
      targets a higher ancestor (matching MRI semantics). */
   mrb_bool has_refinements =
-    (mrb_refinement_lookup != NULL) && (mrb->c->refinements != NULL);
+    (mrb->refinement_lookup != NULL) && (mrb->c->refinements != NULL);
 #endif
 
   while (c) {
 #ifdef MRB_USE_TASK_REFINEMENTS
     if (has_refinements) {
       struct RClass *rcp = c;
-      if (mrb_refinement_lookup(mrb, c, mid, &rcp, &m)) {
+      if (mrb->refinement_lookup(mrb, c, mid, &rcp, &m)) {
         *cp = rcp;
         /* Refined hits are not cached: they depend on the per-task
            refinement chain which can change between calls. */

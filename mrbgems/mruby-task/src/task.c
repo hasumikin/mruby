@@ -1661,7 +1661,7 @@ mrb_mruby_task_gem_init(mrb_state *mrb)
 
 #ifdef MRB_USE_TASK_REFINEMENTS
   /* Wire the method lookup hook into mruby core */
-  mrb_refinement_lookup              = mrb_refinements_find;
+  mrb->refinement_lookup             = mrb_refinements_find;
   /* Wire the task lifecycle hooks */
   mrb_task_refinements_on_spawn_fn   = mrb_refinements_on_task_spawn;
   mrb_task_refinements_on_destroy_fn = mrb_refinements_on_task_destroy;
@@ -1676,7 +1676,7 @@ void
 mrb_mruby_task_gem_final(mrb_state *mrb)
 {
 #ifdef MRB_USE_TASK_REFINEMENTS
-  mrb_refinement_lookup              = NULL;
+  mrb->refinement_lookup             = NULL;
   mrb_task_refinements_on_spawn_fn   = NULL;
   mrb_task_refinements_on_destroy_fn = NULL;
   mrb_task_refinements_on_init_fn    = NULL;

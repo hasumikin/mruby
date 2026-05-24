@@ -14,11 +14,6 @@
 #include <mruby/error.h>
 #include <mruby/refinements.h>
 
-/* Storage for the function pointer hook used by mrb_vm_find_method in
-   mruby/src/class.c. Set to mrb_refinements_find at gem init and cleared at
-   gem final (see task.c). */
-mrb_refinement_lookup_fn mrb_refinement_lookup = NULL;
-
 /* Invalidate all cache entries that belong to ctx */
 MRB_API void
 mrb_mc_clear_by_ctx(mrb_state *mrb, struct mrb_context *ctx)

@@ -275,7 +275,6 @@ struct mrb_const_cache_entry {
 typedef int (*mrb_refinement_lookup_fn)(struct mrb_state *mrb, struct RClass *c,
                                         mrb_sym mid, struct RClass **cp,
                                         mrb_method_t *m);
-MRB_API mrb_refinement_lookup_fn mrb_refinement_lookup;
 #endif
 
 struct mrb_jmpbuf;
@@ -381,6 +380,9 @@ struct mrb_state {
 
 #ifdef MRB_USE_TASK_SCHEDULER
   mrb_task_state task;                    /* Task scheduler state */
+#endif
+#ifdef MRB_USE_TASK_REFINEMENTS
+  mrb_refinement_lookup_fn refinement_lookup; /* NULL until gem init */
 #endif
 };
 
