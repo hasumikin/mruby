@@ -2786,11 +2786,11 @@ mrb_vm_find_method(mrb_state *mrb, struct RClass *c, struct RClass **cp, mrb_sym
   mrb_method_t m;
 #ifndef MRB_NO_METHOD_CACHE
   struct RClass *oc = c;
-  int h = mrb_int_hash_func(mrb, ((intptr_t)oc >> 4) ^ mid
+  mrb_int hash_key = (mrb_int)(((intptr_t)oc >> 4) ^ mid);
 #ifdef MRB_USE_TASK_REFINEMENTS
-    ^ ((intptr_t)mrb->c >> 4)
+  hash_key ^= (mrb_int)((intptr_t)mrb->c >> 4);
 #endif
-    ) & (MRB_METHOD_CACHE_SIZE/2-1);
+  int h = mrb_int_hash_func(mrb, hash_key) & (MRB_METHOD_CACHE_SIZE/2-1);
   struct mrb_cache_entry *mc = &mrb->cache[h * 2];
 
   /* check way 0 */
