@@ -348,8 +348,13 @@ execute_task(mrb_state *mrb, mrb_task *t)
   /* Set vmexec flag to prevent fiber_terminate from being called */
   t->c.vmexec = TRUE;
 
-  /* Execute task - PC is saved in ci->pc from previous run */
+  /* Execute task - PC is saved in ci->pc from previous run.
+     Hide the scheduler-level protect frame so unhandled task exceptions
+     are returned as the task result instead of escaping mrb_task_run(). */
+  struct mrb_jmpbuf *scheduler_jmp = mrb->jmp;
+  mrb->jmp = NULL;
   t->result = mrb_vm_exec(mrb, proc, pc);
+  mrb->jmp = scheduler_jmp;
 
   /* Clear vmexec flag */
   t->c.vmexec = FALSE;
