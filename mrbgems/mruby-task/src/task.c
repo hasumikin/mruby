@@ -446,6 +446,10 @@ execute_task(mrb_state *mrb, mrb_task *t)
     /* Task yielded but still running - move to ready queue */
     t->status = MRB_TASK_STATUS_READY;
   }
+
+  if (error) {
+    mrb_exc_raise(mrb, t->result);
+  }
 }
 
 /* Tick handler - called by timer interrupt */
