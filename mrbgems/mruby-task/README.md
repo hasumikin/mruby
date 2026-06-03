@@ -16,6 +16,7 @@ The primary purpose of `mruby-task` is to enable mruby applications to:
 - Synchronize tasks using `sleep`, `join` and `Task::Queue`.
 - Suspend and resume tasks programmatically.
 - Coordinate producers and consumers via `Task::Queue` without polling.
+- Isolate per-task global variables with `Task#fork` (e.g. redirect `$stdout`).
 
 ## Architecture
 
@@ -185,6 +186,51 @@ Task.run
   worker = Task.new { do_long_operation }
   worker.join  # Wait for completion
   puts "Worker finished"
+  ```
+
+- **`#fork(name: nil, priority: 128) { block }`**: Creates and starts a new task whose global variable namespace is a *shallow copy* of the receiver task's, snapshotted at fork time. Rebinding a global inside the block (e.g. `$stdout = pipe`) is isolated to the forked task, while the underlying objects stay shared. This mirrors Unix `fork()` copy-on-write semantics. The receiver is the source task to copy globals from; `Task.current.fork { ... }` forks the running task. Unlike `Task.new`, which shares the real globals, `#fork` gives the new task its own private global table. The `name` and `priority` keywords behave the same as in `Task.new`.
+
+  The primary use case is redirecting `$stdout` per task, such as building shell pipelines, without affecting other tasks.
+
+  ```ruby
+  $message = "parent"
+
+  forked = Task.current.fork(name: "child") do
+    $message = "child"        # isolated: only visible inside this task
+    puts $message             # => "child"
+  end
+
+  Task.run
+  puts $message               # => "parent" (caller is unaffected)
+  ```
+
+  Redirecting `$stdout` to a `Task::Queue` for a single task:
+
+  ```ruby
+  q = Task::Queue.new
+
+  Task.current.fork do
+    $stdout = q               # rebinding is local to this task
+    $stdout.push("piped")
+  end
+
+  Task.run
+  puts q.pop                  # => "piped"
+  ```
+
+  Shared heap objects remain shared because the copy is shallow; only
+  rebinding (reassigning the global itself) is isolated:
+
+  ```ruby
+  shared = [1, 2, 3]
+  $buffer = shared
+
+  Task.current.fork do
+    $buffer << 4              # mutates the shared object, not a rebinding
+  end
+
+  Task.run
+  p shared                    # => [1, 2, 3, 4]
   ```
 
 ### Task::Error
@@ -786,6 +832,7 @@ The gem includes tests that verify:
 - Task::Queue blocking pop and wakeup on push
 - Task::Queue close semantics
 - Task::Queue num_waiting count
+- Task#fork per-task global variable isolation
 
 Run tests with:
 

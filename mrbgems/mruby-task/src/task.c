@@ -12,6 +12,7 @@
 #include <mruby/gc.h>
 #include <mruby/hash.h>
 #include <mruby/internal.h>
+#include <mruby/object.h>
 #include <mruby/proc.h>
 #include <mruby/string.h>
 #include <mruby/variable.h>
@@ -19,6 +20,35 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include "task.h"
+
+/*
+ * Per-task forked globals support (Task#fork).
+ *
+ * root_gv_holder_ is a module object whose ->iv aliases mrb->globals (the root
+ * global variable table).  While a forked task runs, execute_task() swaps
+ * mrb->globals out for the task's own table, so mrb_gc_mark_gv() no longer marks
+ * the root table; the holder keeps those values reachable because it is marked
+ * automatically whenever the Task class is marked.
+ *
+ * The holder MUST be stored per-mrb_state, not in a file-static: the test
+ * harness runs each gem's tests in a separate mrb_state created via
+ * mrb_open_core() while the main driver state is still alive.  A file-static
+ * holder would be clobbered when the sub-state runs gem_init, leaving the main
+ * state's holder un-detached at gem_final and double-freeing the root globals
+ * table at mrb_close.  We therefore stash it as a hidden instance variable on
+ * the (per-state) Task class object.
+ *
+ * At gem_final the holder's ->iv is cleared to NULL before teardown so its
+ * finalizer does not free the root globals table (owned by mrb->globals).
+ */
+#define TASK_ROOT_GV_HOLDER_IV MRB_IVSYM(__task_root_gv_holder__)
+
+static mrb_value
+task_root_gv_holder(mrb_state *mrb)
+{
+  struct RClass *task_class = mrb_class_get(mrb, "Task");
+  return mrb_iv_get(mrb, mrb_obj_value(task_class), TASK_ROOT_GV_HOLDER_IV);
+}
 
 /* Get task pointer from self with validation */
 #define TASK_GET_PTR_OR_RAISE(var, self) \
@@ -62,7 +92,7 @@ mrb_task_free(mrb_state *mrb, void *ptr)
   }
 }
 
-static const struct mrb_data_type mrb_task_type = {
+const struct mrb_data_type mrb_task_type = {
   "Task", mrb_task_free,
 };
 
@@ -125,10 +155,15 @@ mrb_task_mark_all(mrb_state *mrb)
       mrb_gc_mark_value(mrb, t->self);
       mrb_gc_mark_value(mrb, t->result);
       mrb_gc_mark_value(mrb, t->name);
+      mrb_gc_mark_value(mrb, t->gv_holder);
 
       t = t->next;
     }
   }
+
+  /* The root globals alias holder is marked automatically as an instance
+     variable of the Task class, so root global values stay reachable even
+     while a forked task has swapped mrb->globals out. Nothing to do here. */
 }
 
 /*
@@ -364,6 +399,16 @@ execute_task(mrb_state *mrb, mrb_task *t)
   t->c.prev = mrb->c;
   mrb->c = &t->c;
 
+  /* Swap globals for forked tasks (Task#fork).
+     Non-forked tasks (gv_holder == nil) pay nothing. */
+  struct iv_tbl *saved_globals = NULL;
+  mrb_bool globals_swapped = FALSE;
+  if (!mrb_nil_p(t->gv_holder)) {
+    saved_globals = mrb->globals;
+    mrb->globals = ((struct RObject *)mrb_obj_ptr(t->gv_holder))->iv;
+    globals_swapped = TRUE;
+  }
+
   /* Clear switching flag */
   switching_ = FALSE;
 
@@ -399,6 +444,12 @@ execute_task(mrb_state *mrb, mrb_task *t)
   prev_c->ci = prev_ci;
   prev_ci->cci = prev_cci;
 
+  /* Restore globals (persist in-task assignments / realloc, then restore root). */
+  if (globals_swapped) {
+    ((struct RObject *)mrb_obj_ptr(t->gv_holder))->iv = mrb->globals;
+    mrb->globals = saved_globals;
+  }
+
   /* If an abnormal path inside mrb_vm_exec() bypassed
      exception_as_result and unwound via MRB_THROW (e.g. a
      CINFO_SKIP frame), mrb_protect_error caught it and stored the
@@ -426,6 +477,10 @@ execute_task(mrb_state *mrb, mrb_task *t)
   else if (t->status == MRB_TASK_STATUS_RUNNING) {
     /* Task yielded but still running - move to ready queue */
     t->status = MRB_TASK_STATUS_READY;
+  }
+
+  if (error) {
+    mrb_exc_raise(mrb, t->result);
   }
 }
 
@@ -714,6 +769,44 @@ mrb_f_usleep(mrb_state *mrb, mrb_value self)
   return mrb_fixnum_value(usec);
 }
 
+/*
+ * Fork globals: copy the source iv_tbl into a fresh module holder.
+ * Uses mrb_iv_copy (public API) via a temporary anonymous module alias.
+ *
+ * We use mrb_module_new() (MRB_TT_MODULE) instead of MRB_TT_OBJECT because
+ * module objects are NEVER shaped (MRB_OBJ_SHAPED_P checks tt==MRB_TT_OBJECT).
+ * Setting alias->iv on a shaped MRB_TT_OBJECT would corrupt the shape pointer
+ * and crash GC.  Module->iv is always a plain iv_tbl* pointer.
+ *
+ * Must be called after task_create_common() so t->self is mrb_gc_register'd
+ * (protecting t->gv_holder from GC once set).
+ */
+MRB_API void
+mrb_task_fork_globals(mrb_state *mrb, mrb_task *t, struct iv_tbl *src_tbl)
+{
+  if (!src_tbl) return;  /* nothing to fork */
+
+  mrb_int arena = mrb_gc_arena_save(mrb);
+
+  /* Alias module: point its iv at src_tbl so mrb_iv_copy can read it.
+     Module iv_tbl is always unshaped, so MRB_OBJ_SHAPED_P == false => mrb_iv_copy
+     takes the plain iv_copy branch (copies the raw iv_tbl entries). */
+  struct RClass *alias_mod = mrb_module_new(mrb);
+  ((struct RObject *)alias_mod)->iv = src_tbl;  /* borrow; do NOT own */
+
+  /* Holder module: will own the deep-copied iv_tbl for this task's globals. */
+  struct RClass *holder_mod = mrb_module_new(mrb);
+  mrb_iv_copy(mrb, mrb_obj_value(holder_mod), mrb_obj_value(alias_mod));
+
+  /* Detach alias so its finalizer does not free src_tbl. */
+  ((struct RObject *)alias_mod)->iv = NULL;
+
+  t->gv_holder = mrb_obj_value(holder_mod);
+  /* holder_mod is reachable via t->gv_holder; mrb_task_mark_all marks it. */
+
+  mrb_gc_arena_restore(mrb, arena);
+}
+
 /* Common task creation logic shared by Task.new and mrb_create_task */
 static mrb_task*
 task_create_common(mrb_state *mrb, const struct RProc *proc,
@@ -724,6 +817,7 @@ task_create_common(mrb_state *mrb, const struct RProc *proc,
   t->status = MRB_TASK_STATUS_READY;
   t->reason = MRB_TASK_REASON_NONE;
   t->name = name;
+  t->gv_holder = mrb_nil_value();
 
   mrb_value task_obj = mrb_obj_value(mrb_data_object_alloc(mrb, mrb_class_get(mrb, "Task"),
                                                            t, &mrb_task_type));
@@ -790,6 +884,63 @@ mrb_task_s_new(mrb_state *mrb, mrb_value self)
   return t->self;
 }
 
+/*
+ * task.fork(name: nil, priority: 128) { block }
+ *
+ * Creates a new task whose global namespace is a shallow copy of the receiver
+ * task's (or the real globals if the receiver is non-forked / main).  Inside
+ * the block, assignments like `$stdout = pipe` are isolated to this task only.
+ */
+static mrb_value
+mrb_task_fork(mrb_state *mrb, mrb_value self)
+{
+  mrb_value blk;
+  mrb_value name_val = mrb_nil_value();
+  mrb_int priority = 128;
+  mrb_value kw_values[2] = {mrb_undef_value(), mrb_undef_value()};
+  mrb_sym kw_names[2] = {MRB_SYM(name), MRB_SYM(priority)};
+  const mrb_kwargs kwargs = { 2, 0, kw_names, kw_values, NULL };
+
+  mrb_get_args(mrb, "&:", &blk, &kwargs);
+
+  if (mrb_nil_p(blk)) {
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "Task#fork requires a block");
+  }
+
+  if (!mrb_undef_p(kw_values[0])) {
+    if (!mrb_string_p(kw_values[0])) mrb_raise(mrb, E_TYPE_ERROR, "name must be a String");
+    name_val = kw_values[0];
+  }
+  if (!mrb_undef_p(kw_values[1])) {
+    if (!mrb_integer_p(kw_values[1])) mrb_raise(mrb, E_TYPE_ERROR, "priority must be an Integer");
+    priority = mrb_integer(kw_values[1]);
+    if (priority < 0 || 255 < priority) mrb_raise(mrb, E_ARGUMENT_ERROR, "priority must be 0-255");
+  }
+
+  /* Determine source globals table from the receiver task.
+     mrb->globals is always "current task's globals" (swapped in by execute_task
+     for forked tasks, or the real root globals otherwise).  If the receiver has
+     its own forked table, use that directly. */
+  struct iv_tbl *src_tbl = mrb->globals;
+  {
+    mrb_task *src = (mrb_task*)mrb_data_check_get_ptr(mrb, self, &mrb_task_type);
+    if (src && !mrb_nil_p(src->gv_holder)) {
+      src_tbl = mrb_obj_ptr(src->gv_holder)->iv;
+    }
+    /* else: receiver is main_task or non-forked => use mrb->globals (root/current) */
+  }
+
+  /* Ensure src_tbl is non-NULL (create root globals if not yet allocated) */
+  if (!src_tbl) {
+    mrb_gv_set(mrb, MRB_GVSYM(__task_fork__), mrb_nil_value());
+    src_tbl = mrb->globals;
+  }
+
+  mrb_task *t = task_create_common(mrb, mrb_proc_ptr(blk), name_val, (uint8_t)priority);
+  mrb_task_fork_globals(mrb, t, src_tbl);
+  return t->self;
+}
+
 static mrb_value
 mrb_task_s_current(mrb_state *mrb, mrb_value self)
 {
@@ -806,6 +957,7 @@ mrb_task_s_current(mrb_state *mrb, mrb_value self)
       t->status = MRB_TASK_STATUS_RUNNING;  /* Always running */
       t->name = mrb_str_new_cstr(mrb, "main");
       t->self = mrb_obj_value(data);
+      t->gv_holder = mrb_nil_value();
       data->data = t;
       data->type = &mrb_task_type;
 
@@ -1583,6 +1735,23 @@ mrb_mruby_task_gem_init(mrb_state *mrb)
   /* Task::Queue */
   mrb_init_task_queue(mrb, task_class);
 
+  /* Initialise root globals alias for GC protection during forked task runs.
+     Use an anonymous module (MRB_TT_MODULE, never shaped) so we can safely
+     set ->iv directly to mrb->globals without corrupting a shape pointer.
+     Stash it as a hidden ivar on the Task class so it is per-mrb_state and
+     marked automatically with the class (see TASK_ROOT_GV_HOLDER_IV note). */
+  if (!mrb->globals) {
+    /* Ensure the table is created; the sentinel global is harmless */
+    mrb_gv_set(mrb, MRB_GVSYM(__task_fork__), mrb_nil_value());
+  }
+  {
+    mrb_int arena = mrb_gc_arena_save(mrb);
+    struct RClass *h_mod = mrb_module_new(mrb);
+    ((struct RObject *)h_mod)->iv = mrb->globals;  /* alias; NOT owned */
+    mrb_iv_set(mrb, mrb_obj_value(task_class), TASK_ROOT_GV_HOLDER_IV, mrb_obj_value(h_mod));
+    mrb_gc_arena_restore(mrb, arena);
+  }
+
   /* Class methods */
   mrb_define_class_method_id(mrb, task_class, MRB_SYM(new),     mrb_task_s_new,     MRB_ARGS_KEY(2,0)|MRB_ARGS_BLOCK());
   mrb_define_class_method_id(mrb, task_class, MRB_SYM(current), mrb_task_s_current, MRB_ARGS_NONE());
@@ -1594,6 +1763,7 @@ mrb_mruby_task_gem_init(mrb_state *mrb)
   mrb_define_class_method_id(mrb, task_class, MRB_SYM(tick),    mrb_task_s_tick,    MRB_ARGS_NONE());
 
   /* Instance methods */
+  mrb_define_method_id(mrb, task_class, MRB_SYM(fork),        mrb_task_fork,         MRB_ARGS_KEY(2,0)|MRB_ARGS_BLOCK());
   mrb_define_method_id(mrb, task_class, MRB_SYM(status),      mrb_task_status,       MRB_ARGS_NONE());
   mrb_define_method_id(mrb, task_class, MRB_SYM(inspect),     mrb_task_inspect,      MRB_ARGS_NONE());
   mrb_define_method_id(mrb, task_class, MRB_SYM(name),        mrb_task_name,         MRB_ARGS_NONE());
@@ -1618,6 +1788,16 @@ mrb_mruby_task_gem_init(mrb_state *mrb)
 void
 mrb_mruby_task_gem_final(mrb_state *mrb)
 {
+  /* Detach the root globals alias holder's iv before teardown so its finalizer
+     does not free the root globals table (owned by mrb->globals) a second time
+     when the holder module is swept. */
+  {
+    mrb_value holder = task_root_gv_holder(mrb);
+    if (mrb_module_p(holder)) {
+      ((struct RObject *)mrb_obj_ptr(holder))->iv = NULL;
+    }
+  }
+
   /* Clear main task pointer - GC will handle freeing the object */
   if (mrb->task.main_task) {
     mrb_gc_unregister(mrb, mrb->task.main_task->self);

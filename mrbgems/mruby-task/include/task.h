@@ -63,6 +63,12 @@ typedef struct mrb_task {
 
   mrb_value result;                /* Task return value */
 
+  /* Per-task forked global namespace (Task#fork).
+   * nil  = share real mrb->globals (non-forked task, zero overhead).
+   * else = RObject whose ->iv IS this task's private global variable table.
+   *        execute_task() swaps mrb->globals with ->iv on every timeslice. */
+  mrb_value gv_holder;
+
   struct mrb_context c;            /* Execution context (stack, callinfo, etc) */
 } mrb_task;
 
@@ -133,6 +139,21 @@ MRB_API mrb_value mrb_task_status(mrb_state *mrb, mrb_value self);
 MRB_API void mrb_task_init_context(mrb_state *mrb, mrb_value task, struct RProc *proc);
 MRB_API void mrb_task_reset_context(mrb_state *mrb, mrb_value task);
 MRB_API void mrb_task_proc_set(mrb_state *mrb, mrb_value task, struct RProc *proc);
+
+/*
+ * Data type descriptor for Task Ruby objects.
+ * Exported so that dependent gems (e.g. picoruby-sandbox) can call
+ * mrb_data_get_ptr(mrb, task_val, &mrb_task_type) to recover the mrb_task*.
+ */
+MRB_API const struct mrb_data_type mrb_task_type;
+
+/*
+ * Fork the global namespace of task t from the current mrb->globals.
+ * Called by picoruby-sandbox when creating a redirected command task.
+ * Must be called after the task has been created and gc_register'd
+ * (so that t->gv_holder is safe against GC once set).
+ */
+MRB_API void mrb_task_fork_globals(mrb_state *mrb, mrb_task *t, struct iv_tbl *src);
 
 /*
  * Internal helpers - used by task.c and task_queue.c
