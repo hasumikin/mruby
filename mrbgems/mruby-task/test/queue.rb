@@ -199,3 +199,78 @@ assert("Task::Queue timeout validates arguments") do
   assert_raise(ArgumentError) { q.pop(timeout_ms: -1) }
   assert_raise(ArgumentError) { q.pop(true, timeout_ms: 1) }
 end
+
+# Native-producer (refill / signal_isr) tests - see TaskTest helpers in
+# tasktest.c. The helpers share one static C buffer, so each test resets it.
+
+assert("Task::Queue refill supplies items to non-blocking pop") do
+  TaskTest.native_reset
+  q = TaskTest.attach_refill(Task::Queue.new)
+  TaskTest.native_push("a")
+  TaskTest.native_push("b")
+
+  assert_equal "a", q.pop(true)
+  assert_equal "b", q.pop(true)
+  assert_raise(Task::Error) { q.pop(true) }
+end
+
+assert("Task::Queue Ruby items take precedence over refill") do
+  TaskTest.native_reset
+  q = TaskTest.attach_refill(Task::Queue.new)
+  TaskTest.native_push("native")
+  q.push(:ruby)
+
+  assert_equal :ruby, q.pop(true)
+  assert_equal "native", q.pop(true)
+end
+
+assert("Task::Queue blocking pop wakes on signal_isr via tick") do
+  TaskTest.native_reset
+  q = TaskTest.attach_refill(Task::Queue.new)
+  result = nil
+
+  Task.new { result = q.pop(timeout_ms: 1000) }
+  Task.new do
+    sleep_ms 4
+    TaskTest.native_push("packet")
+    TaskTest.signal_isr(q)
+  end
+  Task.run
+
+  assert_equal "packet", result
+end
+
+assert("Task::Queue signal_isr without data re-parks until timeout") do
+  TaskTest.native_reset
+  q = TaskTest.attach_refill(Task::Queue.new)
+  result = :unset
+
+  Task.new { result = q.pop(timeout_ms: 30) }
+  Task.new do
+    sleep_ms 4
+    TaskTest.signal_isr(q)  # spurious: nothing in the native buffer
+  end
+  Task.run
+
+  assert_nil result
+end
+
+assert("Task::Queue refill drains a multi-item native backlog") do
+  TaskTest.native_reset
+  q = TaskTest.attach_refill(Task::Queue.new)
+  received = []
+
+  Task.new do
+    3.times { received << q.pop(timeout_ms: 1000) }
+  end
+  Task.new do
+    sleep_ms 4
+    TaskTest.native_push("p1")
+    TaskTest.native_push("p2")
+    TaskTest.native_push("p3")
+    TaskTest.signal_isr(q)  # one signal for three items
+  end
+  Task.run
+
+  assert_equal ["p1", "p2", "p3"], received
+end

@@ -31,7 +31,36 @@ enum {
   MRB_TASK_REASON_QUEUE = 0x08,  /* Waiting for queue item */
 };
 
-struct mrb_task_queue;
+/*
+ * Task::Queue native state.
+ *
+ * Defined here (rather than privately in task_queue.c) because mrb_tick
+ * must read `signaled` while scanning waiters.
+ *
+ * The refill hook connects a queue to a native producer that cannot push
+ * Ruby objects itself (typically an ISR filling a C-side buffer):
+ *
+ *   - The ISR stores its payload in gem-owned C memory, then calls
+ *     mrb_task_queue_signal_isr(q) - two volatile stores, no allocation,
+ *     no lock, no scheduler-queue access, safe at interrupt priority.
+ *   - The next mrb_tick sees mrb->task.queue_signaled and moves the
+ *     queue's waiters to READY.
+ *   - Queue#pop, finding no Ruby-side items, calls `refill` in VM
+ *     context; the hook materializes ONE item (e.g. an mrb_str from the
+ *     C buffer) and returns it, or mrb_nil_value() when it has nothing.
+ *
+ * pop calls refill whenever the Ruby-side buffer is empty - not only
+ * after a signal - so a multi-item native backlog drains one item per
+ * pop without needing one signal per item.
+ */
+struct mrb_state;
+typedef struct mrb_task_queue {
+  uint8_t closed;
+  volatile uint8_t signaled;       /* ISR-side wake request (see above) */
+  struct mrb_state *mrb;           /* Owner VM - lets the ISR reach queue_signaled */
+  mrb_value (*refill)(struct mrb_state *mrb, void *ud);
+  void *refill_ud;
+} mrb_task_queue;
 
 /*
  * Task structure - represents a single task in the scheduler
@@ -142,6 +171,23 @@ MRB_API void mrb_close_task(mrb_state *mrb, mrb_value task);
 MRB_API mrb_bool mrb_stop_task(mrb_state *mrb, mrb_value task);
 MRB_API mrb_value mrb_task_value(mrb_state *mrb, mrb_value task);
 MRB_API mrb_value mrb_task_status(mrb_state *mrb, mrb_value self);
+
+/*
+ * Task::Queue native-producer API (see mrb_task_queue above)
+ *
+ * mrb_task_queue_ptr returns the native handle backing a Task::Queue
+ * object. The pointer is owned by the object: keep the object alive
+ * (e.g. mrb_gc_register) for as long as an ISR may signal it.
+ *
+ * mrb_task_queue_signal_isr is the only mruby-task entry point that is
+ * safe to call from interrupt context. It requires a refill hook to be
+ * set on the queue - the woken pop consumes the signal only through it.
+ */
+MRB_API mrb_task_queue *mrb_task_queue_ptr(mrb_state *mrb, mrb_value queue);
+MRB_API void mrb_task_queue_set_refill(mrb_state *mrb, mrb_value queue,
+                                       mrb_value (*refill)(mrb_state *mrb, void *ud),
+                                       void *ud);
+MRB_API void mrb_task_queue_signal_isr(mrb_task_queue *q);
 
 /*
  * Task context management API (for picoruby-sandbox)

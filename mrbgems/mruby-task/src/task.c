@@ -508,16 +508,29 @@ mrb_tick(mrb_state *mrb)
     }
   }
 
-  /* Wake up sleeping tasks whose wakeup time has passed.
+  /* Wake up waiting tasks: sleepers whose wakeup time has passed and
+   * queue waiters whose queue was signaled from ISR context.
+   *
+   * mrb_task_queue_signal_isr cannot touch the scheduler queues itself
+   * (it may run at interrupt priority, possibly above this tick), so it
+   * only sets q->signaled plus the per-VM queue_signaled flag; the queue
+   * manipulation is deferred to here, where the tick already owns the
+   * scheduler structures. A signal landing while this scan runs re-sets
+   * the flag and is picked up by the next tick.
    *
    * UINT32_MAX is the "no sleepers" sentinel. Without the explicit
    * check, (int32_t)(UINT32_MAX - tick_) evaluates negative for the
    * first half of the 32-bit range, so the queue walk fires every
    * tick with nothing to do. Short-circuiting saves the walk in the
-   * common no-sleepers case -- benefits every HAL, not just
+   * common no-sleepers-no-signal case -- benefits every HAL, not just
    * tickless ones. */
-  if (wakeup_tick_ != UINT32_MAX &&
-      (int32_t)(wakeup_tick_ - tick_) <= 0) {
+  mrb_bool signaled = mrb->task.queue_signaled;
+  if (signaled) {
+    mrb->task.queue_signaled = FALSE;
+  }
+  if (signaled ||
+      (wakeup_tick_ != UINT32_MAX &&
+       (int32_t)(wakeup_tick_ - tick_) <= 0)) {
     mrb_task *curr = q_waiting_;
     mrb_task *next;
     uint32_t next_wakeup = UINT32_MAX;
@@ -526,32 +539,42 @@ mrb_tick(mrb_state *mrb)
       next = curr->next;
 
       uint32_t curr_wakeup = UINT32_MAX;
+      mrb_bool wake_now = FALSE;
       if (curr->reason == MRB_TASK_REASON_SLEEP) {
         curr_wakeup = curr->wait.wakeup_tick;
       }
       else if (curr->reason == MRB_TASK_REASON_QUEUE) {
         curr_wakeup = curr->wait.queue.wakeup_tick;
+        /* Checked on every scan (not only signal-triggered ones) so a
+         * signal whose VM-level flag was consumed before this task
+         * parked is still rescued by the next timed scan. */
+        if (curr->wait.queue.target && curr->wait.queue.target->signaled) {
+          wake_now = TRUE;
+        }
+      }
+      if (curr_wakeup != UINT32_MAX &&
+          (int32_t)(curr_wakeup - tick_) <= 0) {
+        wake_now = TRUE;
       }
 
-      if (curr_wakeup != UINT32_MAX) {
-        if ((int32_t)(curr_wakeup - tick_) <= 0) {
-          /* Time to wake up. Only clear the queue-specific wait state when the
-           * task was actually waiting on a queue; for a SLEEP waiter the active
-           * union member is wait.wakeup_tick, not wait.queue. */
-          mrb_task_q_delete(mrb, curr);
-          curr->status = MRB_TASK_STATUS_READY;
-          if (curr->reason == MRB_TASK_REASON_QUEUE) {
-            curr->wait.queue.target = NULL;
-            curr->wait.queue.wakeup_tick = UINT32_MAX;
-          }
-          curr->reason = MRB_TASK_REASON_NONE;
-          mrb_task_q_insert(mrb, curr);
-          switching_ = TRUE;
+      if (wake_now) {
+        /* Only clear the queue-specific wait state when the task was
+         * actually waiting on a queue; for a SLEEP waiter the active
+         * union member is wait.wakeup_tick, not wait.queue. */
+        mrb_task_q_delete(mrb, curr);
+        curr->status = MRB_TASK_STATUS_READY;
+        if (curr->reason == MRB_TASK_REASON_QUEUE) {
+          curr->wait.queue.target = NULL;
+          curr->wait.queue.wakeup_tick = UINT32_MAX;
         }
-        else if (next_wakeup == UINT32_MAX ||
-                 (int32_t)(curr_wakeup - next_wakeup) < 0) {
-          next_wakeup = curr_wakeup;
-        }
+        curr->reason = MRB_TASK_REASON_NONE;
+        mrb_task_q_insert(mrb, curr);
+        switching_ = TRUE;
+      }
+      else if (curr_wakeup != UINT32_MAX &&
+               (next_wakeup == UINT32_MAX ||
+                (int32_t)(curr_wakeup - next_wakeup) < 0)) {
+        next_wakeup = curr_wakeup;
       }
 
       curr = next;
@@ -1748,9 +1771,14 @@ mrb_mruby_task_gem_init(mrb_state *mrb)
   mrb->task.irq_nesting = 0;
   mrb->task.loop_running = FALSE;
   mrb->task.exception_as_result = FALSE;
+  mrb->task.queue_signaled = FALSE;
 
   task_class = mrb_define_class_id(mrb, MRB_SYM(Task), mrb->object_class);
   MRB_SET_INSTANCE_TT(task_class, MRB_TT_DATA);
+
+  /* Milliseconds represented by one Task.tick increment; lets Ruby code
+     convert tick deltas into wall-clock time. */
+  mrb_define_const_id(mrb, task_class, MRB_SYM(TICK_UNIT_MS), mrb_fixnum_value(MRB_TICK_UNIT));
 
   /* Task::Error - base error class for task synchronization errors */
   mrb_define_class_under_id(mrb, task_class, MRB_SYM(Error), mrb->eStandardError_class);

@@ -10,9 +10,8 @@
 #include <mruby/variable.h>
 #include "task.h"
 
-typedef struct mrb_task_queue {
-  uint8_t closed;
-} mrb_task_queue;
+/* struct mrb_task_queue is defined in task.h: mrb_tick reads `signaled`
+   and gems set up the native-producer (refill) side. */
 
 static void
 mrb_task_queue_free(mrb_state *mrb, void *ptr)
@@ -82,6 +81,10 @@ queue_initialize(mrb_state *mrb, mrb_value self)
 {
   mrb_task_queue *q = (mrb_task_queue*)mrb_malloc(mrb, sizeof(mrb_task_queue));
   q->closed = 0;
+  q->signaled = 0;
+  q->mrb = mrb;
+  q->refill = NULL;
+  q->refill_ud = NULL;
   mrb_data_init(self, q, &mrb_task_queue_type);
   mrb_iv_set(mrb, self, MRB_IVSYM(items), mrb_ary_new(mrb));
   return self;
@@ -165,6 +168,22 @@ queue_pop_try(mrb_state *mrb, mrb_value self)
     return item;
   }
 
+  /* Native producer - pull one item, materialized here in VM context
+   * (an ISR can signal the queue but never construct Ruby objects).
+   * Tried whenever the Ruby-side buffer is empty, not only after a
+   * signal, so a multi-item native backlog drains one item per pop.
+   * Clearing `signaled` before the refill reads its buffer keeps the
+   * usual consume-then-check order: a signal racing in after the read
+   * re-sets the flag and the park below is skipped. */
+  if (q->refill) {
+    q->signaled = 0;
+    mrb_value item = q->refill(mrb, q->refill_ud);
+    if (!mrb_nil_p(item)) {
+      mrb_gc_protect(mrb, item);
+      return item;
+    }
+  }
+
   /* Closed and empty */
   if (q->closed) {
     return mrb_nil_value();
@@ -206,6 +225,16 @@ queue_pop_try(mrb_state *mrb, mrb_value self)
   /* Move current task to WAITING */
   mrb_task *current = MRB2TASK(mrb);
   mrb_task_excl_enter(mrb);
+  /* Lost-wakeup guard: a signal may have landed after the refill above
+   * cleared `signaled`, and the tick may already have consumed the
+   * VM-level flag while this task was still running (finding no waiter
+   * to wake). Parking now would sleep through that signal, so re-check
+   * under the IRQ exclusion - no signal can interleave past this point
+   * - and retry instead. */
+  if (q->refill && q->signaled) {
+    mrb_task_excl_exit(mrb);
+    return wait_retry_;
+  }
   mrb_task_q_delete(mrb, current);
   current->status = MRB_TASK_STATUS_WAITING;
   current->reason = MRB_TASK_REASON_QUEUE;
@@ -282,6 +311,36 @@ queue_num_waiting(mrb_state *mrb, mrb_value self)
   }
   mrb_task_excl_exit(mrb);
   return mrb_int_value(mrb, (mrb_int)count);
+}
+
+/*
+ * Native-producer C API (see the struct comment in task.h)
+ */
+
+MRB_API mrb_task_queue*
+mrb_task_queue_ptr(mrb_state *mrb, mrb_value queue)
+{
+  return (mrb_task_queue*)mrb_data_get_ptr(mrb, queue, &mrb_task_queue_type);
+}
+
+MRB_API void
+mrb_task_queue_set_refill(mrb_state *mrb, mrb_value queue,
+                          mrb_value (*refill)(mrb_state *mrb, void *ud),
+                          void *ud)
+{
+  mrb_task_queue *q = mrb_task_queue_ptr(mrb, queue);
+  q->refill = refill;
+  q->refill_ud = ud;
+}
+
+MRB_API void
+mrb_task_queue_signal_isr(mrb_task_queue *q)
+{
+  /* Order matters: `signaled` must be visible before the tick's
+   * queue_signaled check. Both are volatile stores, so the compiler
+   * preserves the order. */
+  q->signaled = 1;
+  q->mrb->task.queue_signaled = TRUE;
 }
 
 void

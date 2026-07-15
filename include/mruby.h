@@ -300,6 +300,7 @@ typedef struct mrb_task_state {
   volatile uint32_t tick;           /* Current tick count */
   volatile uint32_t wakeup_tick;    /* Next wakeup tick */
   volatile mrb_bool switching;      /* Context switch pending flag */
+  volatile mrb_bool queue_signaled; /* A Task::Queue was signaled from ISR context */
   struct mrb_task *main_task;       /* Main task wrapper for root context */
   uint8_t scheduler_lock;           /* Lock counter for synchronous execution */
   uint8_t irq_nesting;              /* Depth counter for scheduler-IRQ exclusion */
