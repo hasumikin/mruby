@@ -65,6 +65,47 @@ Negative offsets and range endpoints raise `IndexError`; there is no
 count-from-end normalization. A negative `length` raises
 `ArgumentError`, and an explicit `nil` length raises `TypeError`.
 
+### Bit search
+
+- `String#bit_index(bit, offset = 0, lsb_first: true)` - the offset of
+  the first bit at or after `offset` that is equal to `bit`, or `nil`
+
+`bit` is `0`, `1`, `true` or `false`. The result is counted from the
+start of the string, in the numbering that `lsb_first` selects. A byte
+that holds no matching bit is skipped in one step, so a search over
+sparse data is fast. An `offset` at or beyond the end returns `nil`.
+
+```ruby
+"\xF0".bit_index(1)                    # => 4
+"\xF0".bit_index(0, 4)                 # => nil
+"\xF0".bit_index(1, lsb_first: false)  # => 0
+```
+
+### Bit field read
+
+- `String#bit_field_get(offset, length, lsb_first: true)`,
+  `String#bit_field_get(range, lsb_first: true)` - the bits of the
+  region as a non-negative Integer
+
+With `lsb_first: true`, the first bit of the region is the least
+significant bit of the result, so a byte-aligned region reads as a
+little-endian number. With `lsb_first: false`, the first bit of the
+region is the most significant bit of the result, which is the order
+of RFC bit diagrams.
+
+```ruby
+data = "\xF0\xAA"
+data.bit_field_get(0, 8)                      # => 240
+data.bit_field_get(4, 8)                      # => 175
+"\x12\x34".bit_field_get(0, 16, lsb_first: false)  # => 0x1234
+```
+
+Unlike `bit_count`, the region does not clamp: a truncated value would
+be wrong, so a region that extends beyond the end returns `nil`, as
+`bit_get` does beyond the end. An empty region returns `0`. A field
+wider than `mrb_int` can hold (63 bits with `MRB_INT64`, 31 bits
+otherwise) raises `RangeError`, because the result is never a Bignum.
+
 ### Whole-string operations
 
 - `String#bit_count(lsb_first: true)` - number of set bits (population

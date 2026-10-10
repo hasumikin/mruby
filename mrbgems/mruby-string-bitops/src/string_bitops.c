@@ -580,6 +580,252 @@ mrb_str_bit_count(mrb_state *mrb, mrb_value str)
   return mrb_uint64_value(mrb, bitop_count_region(ptr, start, end, lsb_first));
 }
 
+/* The bit argument of bit_index: 0, 1, true or false. */
+static int
+bitop_bit_arg(mrb_state *mrb, mrb_value bit)
+{
+  mrb_int v;
+
+  if (mrb_true_p(bit)) return 1;
+  if (mrb_false_p(bit)) return 0;
+  v = mrb_as_int(mrb, mrb_ensure_integer_type(mrb, bit));
+  if (v == 0 || v == 1) return (int)v;
+  mrb_raise(mrb, E_ARGUMENT_ERROR, "bit must be 0, 1, true, or false");
+}
+
+/* The lowest logical bit set in a non-zero byte mask. */
+static unsigned int
+bitop_lowest_logical(unsigned int matching, mrb_bool lsb_first)
+{
+  unsigned int physical;
+
+  if (lsb_first) {
+    physical = 0;
+    while (!((matching >> physical) & 1)) physical++;
+    return physical;
+  }
+  physical = 7;
+  while (!((matching >> physical) & 1)) physical--;
+  return 7 - physical;
+}
+
+/*
+ * bit_index(bit, offset = 0): the logical offset of the first bit at or
+ * after offset that equals bit, or nil.  A byte with no matching bit is
+ * skipped in one step.
+ */
+/*
+ * The search of bit_index on a byte sequence: the logical offset of the
+ * first bit of [start, end) that equals bit, or -1.  The caller keeps
+ * end within the string.
+ */
+static int64_t
+bitop_search(const unsigned char *ptr, uint64_t start, uint64_t end, int bit, mrb_bool lsb_first)
+{
+  unsigned char invert = bit ? 0 : 0xFF;
+  mrb_int byte_index, last_byte;
+  unsigned int lo;
+
+  if (start >= end) return -1;
+  byte_index = (mrb_int)(start / 8);
+  last_byte = (mrb_int)((end - 1) / 8);
+  lo = (unsigned int)(start % 8);
+  for (; byte_index <= last_byte; byte_index++, lo = 0) {
+    unsigned int hi = byte_index == last_byte ? (unsigned int)((end - 1) % 8) + 1 : 8;
+    unsigned int matching = (ptr[byte_index] ^ invert) & bitop_byte_mask(lo, hi, lsb_first);
+    if (matching == 0) continue;
+    return (int64_t)((uint64_t)byte_index * 8 + bitop_lowest_logical(matching, lsb_first));
+  }
+  return -1;
+}
+
+static mrb_value
+mrb_str_bit_index(mrb_state *mrb, mrb_value str)
+{
+  mrb_value bit_v, index, length;
+  mrb_bool lsb_first;
+  mrb_sym kw_names[1];
+  mrb_value kw_values[1];
+  mrb_kwargs kwargs;
+  mrb_int argc;
+
+  kw_names[0] = MRB_SYM(lsb_first);
+  kwargs.num = 1;
+  kwargs.required = 0;
+  kwargs.table = kw_names;
+  kwargs.values = kw_values;
+  kwargs.rest = NULL;
+  argc = mrb_get_args(mrb, "o|oo:", &bit_v, &index, &length, &kwargs);
+  lsb_first = bitop_lsb_first(mrb, kw_values[0]);
+  int bit = bitop_bit_arg(mrb, bit_v);
+  uint64_t bit_size = (uint64_t)RSTRING_LEN(str) * 8;
+  uint64_t start = 0, end = bit_size;
+  int64_t found;
+
+  if (argc == 3 || (argc == 2 && mrb_range_p(index))) {
+    bitop_scan_region(mrb, argc - 1, index, length, bit_size, &start, &end);
+    /* A search clamps: the window ends at the end of self, as String#index. */
+    if (end > bit_size) end = bit_size;
+  }
+  else if (argc == 2) {
+    start = bitop_offset(mrb, index);
+  }
+  found = bitop_search((const unsigned char*)RSTRING_PTR(str), start, end, bit, lsb_first);
+
+  return found < 0 ? mrb_nil_value() : mrb_uint64_value(mrb, (uint64_t)found);
+}
+
+/*
+ * Scans the arguments of the two iterator prototypes below: the
+ * positional arguments of fmt, the lsb_first keyword and a required
+ * block.
+ */
+static mrb_int
+bitop_scan_block_args(mrb_state *mrb, const char *fmt, mrb_value *a, mrb_value *b, mrb_bool *lsb_first, mrb_value *blk)
+{
+  mrb_int argc;
+  mrb_sym kw_names[1];
+  mrb_value kw_values[1];
+  mrb_kwargs kwargs;
+
+  kw_names[0] = MRB_SYM(lsb_first);
+  kwargs.num = 1;
+  kwargs.required = 0;
+  kwargs.table = kw_names;
+  kwargs.values = kw_values;
+  kwargs.rest = NULL;
+  argc = b ? mrb_get_args(mrb, fmt, a, b, &kwargs, blk) : mrb_get_args(mrb, fmt, a, &kwargs, blk);
+  *lsb_first = bitop_lsb_first(mrb, kw_values[0]);
+  return argc;
+}
+
+/*
+ * PROTOTYPE for the measurements of [Feature #22399]: not part of the
+ * proposal.  each_bit_index(bit, offset = 0) { |offset| }: calls the
+ * block with the offset of every bit at or after offset that equals
+ * bit.  The block is required.  The receiver is read again after each
+ * call, so a block that changes it does not read freed memory.
+ */
+static mrb_value
+mrb_str_each_bit_index(mrb_state *mrb, mrb_value str)
+{
+  mrb_value bit_v, index, blk;
+  mrb_bool lsb_first;
+  mrb_int argc = bitop_scan_block_args(mrb, "o|o:&!", &bit_v, &index, &lsb_first, &blk);
+  int bit = bitop_bit_arg(mrb, bit_v);
+  uint64_t pos = argc == 2 ? bitop_offset(mrb, index) : 0;
+
+  for (;;) {
+    int64_t found = bitop_search((const unsigned char*)RSTRING_PTR(str), pos, (uint64_t)RSTRING_LEN(str) * 8, bit, lsb_first);
+    if (found < 0) break;
+    mrb_yield(mrb, blk, mrb_uint64_value(mrb, (uint64_t)found));
+    pos = (uint64_t)found + 1;
+  }
+  return str;
+}
+
+/*
+ * PROTOTYPE for the measurements of [Feature #22405]: not part of the
+ * proposal.  each_bit_run { |bit, offset, length| }: calls the block
+ * once per run of equal bits, in order of offset.  The block is
+ * required.  The three values are passed without an Array.
+ */
+static mrb_value
+mrb_str_each_bit_run(mrb_state *mrb, mrb_value str)
+{
+  mrb_value blk, argv[3];
+  mrb_bool lsb_first;
+  uint64_t pos = 0;
+  mrb_sym kw_names[1];
+  mrb_value kw_values[1];
+  mrb_kwargs kwargs;
+
+  kw_names[0] = MRB_SYM(lsb_first);
+  kwargs.num = 1;
+  kwargs.required = 0;
+  kwargs.table = kw_names;
+  kwargs.values = kw_values;
+  kwargs.rest = NULL;
+  mrb_get_args(mrb, ":&!", &kwargs, &blk);
+  lsb_first = bitop_lsb_first(mrb, kw_values[0]);
+  for (;;) {
+    const unsigned char *ptr = (const unsigned char*)RSTRING_PTR(str);
+    mrb_int len = RSTRING_LEN(str);
+    uint64_t bit_size = (uint64_t)len * 8;
+    mrb_int physical;
+    int bit;
+    int64_t next;
+
+    if (pos >= bit_size) break;
+    physical = bitop_physical_index((mrb_int)pos, lsb_first);
+    bit = (ptr[physical / 8] >> (physical % 8)) & 1;
+    next = bitop_search(ptr, pos, bit_size, 1 - bit, lsb_first);
+    if (next < 0) next = (int64_t)bit_size;
+    argv[0] = mrb_fixnum_value(bit);
+    argv[1] = mrb_uint64_value(mrb, pos);
+    argv[2] = mrb_uint64_value(mrb, (uint64_t)next - pos);
+    mrb_yield_argv(mrb, blk, 3, argv);
+    pos = (uint64_t)next;
+  }
+  return str;
+}
+
+/*
+ * bit_field_get(offset, length) and bit_field_get(range): the bits
+ * of the region as a non-negative Integer.  With lsb_first the first bit
+ * of the region is the least significant bit of the result; with
+ * lsb_first: false it is the most significant bit, the order of RFC bit
+ * diagrams.  The region must fit: a truncated value would be wrong, so a
+ * region past the end reads as nil, like bit_get.  A region wider than
+ * mrb_int can represent is a RangeError, because there is no Bignum.
+ */
+static mrb_value
+mrb_str_bit_field_get(mrb_state *mrb, mrb_value str)
+{
+  mrb_value a, b;
+  mrb_bool lsb_first;
+  uint64_t start, end, bit_size = (uint64_t)RSTRING_LEN(str) * 8;
+  const unsigned char *ptr = (const unsigned char*)RSTRING_PTR(str);
+  mrb_int argc = bitop_scan_args(mrb, "o|o:", &a, &b, &lsb_first);
+  uint64_t value = 0, len, pos;
+
+  if (argc == 1 && !mrb_range_p(a)) {
+    mrb_raise(mrb, E_ARGUMENT_ERROR, "bit_field_get takes a Range or an offset and a length");
+  }
+  bitop_scan_region(mrb, argc, a, b, bit_size, &start, &end);
+  if (end > bit_size) return mrb_nil_value();
+  len = end - start;
+  if (len == 0) return mrb_fixnum_value(0);
+  if (len > (uint64_t)(sizeof(mrb_int) * 8 - 1)) {
+    mrb_raise(mrb, E_RANGE_ERROR, "bit field too wide for Integer");
+  }
+
+  for (pos = start; pos < end; ) {
+    mrb_int byte_index = (mrb_int)(pos / 8);
+    unsigned int lo = (unsigned int)(pos % 8);
+    unsigned int hi = ((end - 1) / 8 == (uint64_t)byte_index) ? (unsigned int)((end - 1) % 8) + 1 : 8;
+    unsigned int n = hi - lo;
+    unsigned int chunk;
+
+    /*
+     * The n logical bits [lo, hi) of this byte, as a number whose least
+     * significant bit is the least significant logical position of the
+     * field.  Under MSB-first numbering, that is logical hi - 1, which
+     * sits at physical 8 - hi.
+     */
+    if (lsb_first) {
+      chunk = (ptr[byte_index] >> lo) & ((1u << n) - 1);
+      value |= (uint64_t)chunk << (pos - start);
+    }
+    else {
+      chunk = (ptr[byte_index] >> (8 - hi)) & ((1u << n) - 1);
+      value |= (uint64_t)chunk << ((end - 1) - (pos + n - 1));
+    }
+    pos += n;
+  }
+  return mrb_int_value(mrb, (mrb_int)value);
+}
+
 /*
  * Matches CRuby: the result of a non-bang bitwise operation is a
  * BINARY (ASCII-8BIT) string.  The flag is observable through
@@ -728,6 +974,11 @@ mrb_mruby_string_bitops_gem_init(mrb_state *mrb)
   mrb_define_method_id(mrb, s, MRB_SYM(bit_clear), mrb_str_bit_clear, MRB_ARGS_ARG(1,1)|MRB_ARGS_KEY(1, 0));
   mrb_define_method_id(mrb, s, MRB_SYM(bit_flip), mrb_str_bit_flip, MRB_ARGS_ARG(1,1)|MRB_ARGS_KEY(1, 0));
   mrb_define_method_id(mrb, s, MRB_SYM(bit_count), mrb_str_bit_count, MRB_ARGS_OPT(2)|MRB_ARGS_KEY(1, 0));
+  mrb_define_method_id(mrb, s, MRB_SYM(bit_index), mrb_str_bit_index, MRB_ARGS_ARG(1,2)|MRB_ARGS_KEY(1, 0));
+  mrb_define_method_id(mrb, s, MRB_SYM(bit_field_get), mrb_str_bit_field_get, MRB_ARGS_ARG(1,1)|MRB_ARGS_KEY(1, 0));
+  /* Prototypes for measurements only; see the comments on the functions. */
+  mrb_define_method_id(mrb, s, MRB_SYM(each_bit_index), mrb_str_each_bit_index, MRB_ARGS_ARG(1,1)|MRB_ARGS_KEY(1, 0)|MRB_ARGS_BLOCK());
+  mrb_define_method_id(mrb, s, MRB_SYM(each_bit_run), mrb_str_each_bit_run, MRB_ARGS_KEY(1, 0)|MRB_ARGS_BLOCK());
   mrb_define_method_id(mrb, s, MRB_SYM(bitwise_not), mrb_str_bitwise_not, MRB_ARGS_NONE());
   mrb_define_method_id(mrb, s, MRB_SYM_B(bitwise_not), mrb_str_bitwise_not_bang, MRB_ARGS_NONE());
   mrb_define_method_id(mrb, s, MRB_SYM(bitwise_and), mrb_str_bitwise_and, MRB_ARGS_REQ(1));

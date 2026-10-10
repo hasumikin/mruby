@@ -325,3 +325,217 @@ assert('String bitwise operations (long strings)') do
   e.bitwise_xor!(f)
   assert_equal "\xA5" * 20, e
 end
+
+assert('String#each_bit_index (prototype)') do
+  data = "\xF0\x05"
+  got = []
+  assert_equal data, data.each_bit_index(1) { |i| got << i }
+  assert_equal [4, 5, 6, 7, 8, 10], got
+  got = []
+  data.each_bit_index(0, 4) { |i| got << i }
+  assert_equal [9, 11, 12, 13, 14, 15], got
+  got = []
+  data.each_bit_index(1, lsb_first: false) { |i| got << i }
+  assert_equal [0, 1, 2, 3, 13, 15], got
+  got = []
+  "".each_bit_index(1) { |i| got << i }
+  assert_equal [], got
+  assert_raise(ArgumentError) { data.each_bit_index(1) }
+end
+
+assert('String#each_bit_run (prototype)') do
+  data = "\xF0\x05"
+  got = []
+  assert_equal data, data.each_bit_run { |bit, off, len| got << [bit, off, len] }
+  assert_equal [[0, 0, 4], [1, 4, 5], [0, 9, 1], [1, 10, 1], [0, 11, 5]], got
+  got = []
+  data.each_bit_run(lsb_first: false) { |bit, off, len| got << [bit, off, len] }
+  assert_equal [[1, 0, 4], [0, 4, 9], [1, 13, 1], [0, 14, 1], [1, 15, 1]], got
+  got = []
+  "".each_bit_run { |*a| got << a }
+  assert_equal [], got
+  assert_raise(ArgumentError) { data.each_bit_run }
+end
+
+assert('String#bit_index') do
+  data = "\xF0"
+  assert_equal 4, data.bit_index(1)
+  assert_equal 0, data.bit_index(0)
+  assert_equal 4, data.bit_index(true)
+  assert_equal 0, data.bit_index(false)
+  assert_nil "\x00".bit_index(1)
+  assert_nil "\xFF".bit_index(0)
+  assert_nil "".bit_index(1)
+
+  # offset: the search begins there, the result stays absolute.
+  assert_equal 5, data.bit_index(1, 5)
+  assert_equal 7, data.bit_index(1, 7)
+  assert_nil data.bit_index(0, 4)
+  assert_nil data.bit_index(1, 8)
+  assert_nil data.bit_index(1, 100)
+
+  # range: the search stops at the end of the window, the result stays absolute.
+  assert_equal 4, data.bit_index(1, 0..)
+  assert_equal 4, data.bit_index(1, 4..4)
+  assert_equal 4, data.bit_index(1, 0..4)
+  assert_nil data.bit_index(1, 0...4)
+  assert_nil data.bit_index(1, 4...4)
+  assert_nil data.bit_index(1, 5..4)
+  assert_equal 7, data.bit_index(1, 7..100)
+  assert_nil data.bit_index(1, 8..100)
+  assert_nil data.bit_index(1, 100..200)
+  assert_equal 1, "\xFD\x03".bit_index(0, 1...10)
+  assert_nil "\xFD\x03".bit_index(0, 2...10)
+  assert_equal 10, "\xFD\x03".bit_index(0, 2..)
+  assert_equal 4, data.bit_index(0, 0..4, lsb_first: false)
+  assert_nil data.bit_index(0, 0...4, lsb_first: false)
+  assert_nil data.bit_index(1, 4.., lsb_first: false)
+  assert_raise(IndexError) { data.bit_index(1, -1..) }
+  assert_raise(IndexError) { data.bit_index(1, 0..-1) }
+
+  # offset and length: the same window as a Range.
+  assert_equal 4, data.bit_index(1, 4, 1)
+  assert_equal 4, data.bit_index(1, 0, 5)
+  assert_nil data.bit_index(1, 0, 4)
+  assert_nil data.bit_index(1, 4, 0)
+  assert_nil data.bit_index(1, 0, 0)
+  assert_equal 7, data.bit_index(1, 7, 100)
+  assert_nil data.bit_index(1, 8, 100)
+  assert_nil data.bit_index(1, 100, 100)
+  assert_equal 1, "\xFD\x03".bit_index(0, 1, 9)
+  assert_nil "\xFD\x03".bit_index(0, 2, 8)
+  assert_nil data.bit_index(0, 0, 4, lsb_first: false)
+  assert_equal 4, data.bit_index(0, 0, 5, lsb_first: false)
+  assert_raise(ArgumentError) { data.bit_index(1, 0, -1) }
+  assert_raise(TypeError) { data.bit_index(1, 0, nil) }
+  assert_raise(ArgumentError) { data.bit_index(1, 0..4, 1) }
+
+  # Bytes with no matching bit are skipped.
+  sparse = "\x00" * 100 + "\x40" + "\x00" * 100
+  assert_equal 806, sparse.bit_index(1)
+  assert_equal 806, sparse.bit_index(1, 806)
+  assert_nil sparse.bit_index(1, 807)
+  assert_equal 801, sparse.bit_index(1, lsb_first: false)
+  dense = "\xFF" * 100 + "\xBF" + "\xFF" * 100
+  assert_equal 806, dense.bit_index(0)
+  assert_equal 801, dense.bit_index(0, lsb_first: false)
+  assert_equal 807, dense.bit_index(1, 807)
+
+  # lsb_first: false numbers the bits within each byte from the MSB.
+  assert_equal 0, data.bit_index(1, lsb_first: false)
+  assert_equal 4, data.bit_index(0, lsb_first: false)
+  assert_equal 5, data.bit_index(0, 5, lsb_first: false)
+
+  assert_raise(IndexError) { data.bit_index(1, -1) }
+  assert_raise(ArgumentError) { data.bit_index(2) }
+  assert_raise(ArgumentError) { data.bit_index(-1) }
+  assert_raise(TypeError) { data.bit_index(nil) }
+  assert_raise(TypeError) { data.bit_index("1") }
+  assert_raise(TypeError) { data.bit_index(1, nil) }
+  assert_raise(ArgumentError) { data.bit_index }
+  assert_raise(ArgumentError) { data.bit_index(1, 0, 0, 0) }
+  assert_raise(ArgumentError) { data.bit_index(1, lsb_first: nil) }
+  assert_equal 4, data.freeze.bit_index(1)
+end
+
+assert('String#bit_field_get') do
+  data = "\xF0\xAA"
+  assert_equal 0xF0, data.bit_field_get(0, 8)
+  assert_equal 0xAA, data.bit_field_get(8, 8)
+  assert_equal 0x0, data.bit_field_get(0, 4)
+  assert_equal 0xF, data.bit_field_get(4, 4)
+  assert_equal 0xAF, data.bit_field_get(4, 8)
+  assert_equal 0xAAF0, data.bit_field_get(0, 16)
+  assert_equal 0xF0, data.bit_field_get(0..7)
+  assert_equal 0xF0, data.bit_field_get(0...8)
+  assert_equal 0xAA, data.bit_field_get(8..)
+  assert_equal 0xAAF0, data.bit_field_get(nil..nil)
+  assert_equal 1, data.bit_field_get(4, 1)
+  assert_equal 0, data.bit_field_get(0, 1)
+
+  # MSB-first numbering: the first bit of the region is the MSB of the result.
+  assert_equal 0xA, "\xAC".bit_field_get(0, 4, lsb_first: false)
+  assert_equal 0xC, "\xAC".bit_field_get(4, 4, lsb_first: false)
+  hdr = "\x12\x34\x81\x80"
+  assert_equal 0x1234, hdr.bit_field_get(0, 16, lsb_first: false)
+  assert_equal 0x8180, hdr.bit_field_get(16, 16, lsb_first: false)
+  assert_equal 0x234, hdr.bit_field_get(4, 12, lsb_first: false)
+  assert_equal 0x3412, hdr.bit_field_get(0, 16)
+  assert_equal 1, hdr.bit_field_get(16, 1, lsb_first: false)
+  assert_equal 0, hdr.bit_field_get(17, 1, lsb_first: false)
+
+  # Every bit offset within a byte, across a byte boundary.
+  s = "\xB5\x6D"  # 10110101 01101101
+  off = 0
+  while off < 8
+    assert_equal (0x6DB5 >> off) & 0xFF, s.bit_field_get(off, 8)
+    assert_equal (0xB56D >> (8 - off)) & 0xFF, s.bit_field_get(off, 8, lsb_first: false)
+    off += 1
+  end
+
+  # The widest field that fits in mrb_int; one more bit is a RangeError.
+  # 1 << w is the largest power of two the Integer holds, so a field of
+  # w + 1 bits fits and its all-ones value is 2 * (1 << w) - 1.
+  ones = "\xFF" * 9
+  w = 0
+  begin
+    while true
+      1 << (w + 1)
+      w += 1
+    end
+  rescue RangeError
+  end
+  max_width = w + 1
+  all_ones = (1 << w) - 1 + (1 << w)
+  assert_equal all_ones, ones.bit_field_get(3, max_width)
+  assert_equal all_ones, ones.bit_field_get(3, max_width, lsb_first: false)
+  assert_raise(RangeError) { ones.bit_field_get(0, max_width + 1) }
+
+  # Fields do not clamp: a region that does not fit reads as nil.
+  assert_nil data.bit_field_get(8, 9)
+  assert_nil data.bit_field_get(16, 1)
+  assert_nil data.bit_field_get(17, 0)
+  assert_nil data.bit_field_get(100, 8)
+  assert_nil data.bit_field_get(8..16)
+  assert_nil data.bit_field_get(100..)
+  assert_equal 0, data.bit_field_get(16, 0)
+  assert_equal 0, data.bit_field_get(0, 0)
+  assert_equal 0, data.bit_field_get(5..2)
+  assert_equal 0, data.bit_field_get(16...16)
+  assert_equal 0, "".bit_field_get(0, 0)
+  assert_nil "".bit_field_get(0, 1)
+
+  assert_raise(IndexError) { data.bit_field_get(-1, 4) }
+  assert_raise(IndexError) { data.bit_field_get(-1..3) }
+  assert_raise(IndexError) { data.bit_field_get(..-1) }
+  assert_raise(ArgumentError) { data.bit_field_get(0, -1) }
+  assert_raise(ArgumentError) { data.bit_field_get(0..3, 4) }
+  assert_raise(ArgumentError) { data.bit_field_get(0) }
+  assert_raise(ArgumentError) { data.bit_field_get }
+  assert_raise(ArgumentError) { data.bit_field_get(nil) }
+  assert_raise(TypeError) { data.bit_field_get(nil, 3) }
+  assert_raise(TypeError) { data.bit_field_get(0, nil) }
+  assert_raise(ArgumentError) { data.bit_field_get(0..3, nil) }
+  assert_raise(ArgumentError) { data.bit_field_get(0, 4, lsb_first: nil) }
+
+  # Agrees with bit_get.
+  s = "\x5A\xC3\x3C"
+  [true, false].each do |order|
+    off = 0
+    while off < 24
+      len = 0
+      while len <= 24 - off
+        expected = 0
+        i = 0
+        while i < len
+          bit = s.bit_get(off + i, lsb_first: order)
+          expected |= bit << (order ? i : len - 1 - i)
+          i += 1
+        end
+        assert_equal expected, s.bit_field_get(off, len, lsb_first: order)
+        len += 1
+      end
+      off += 1
+    end
+  end
+end
